@@ -18,13 +18,13 @@ def modify(relpath: str, old: str, new: str):
 
 # The manual preview no longer expires when the selected address still broadcasts.
 # It is cleared 60 seconds after the last advertisement (including RPA rotation).
-modify("services/AirPodsService.kt", """                batteryNotification.setBatteryFromBle(status)
+modify("services/AirPodsService.kt", """            if (status.address == manualBleAddress &&
+                android.os.SystemClock.elapsedRealtime() < manualBleExpiryMs && !isConnectedLocally) {
+                batteryNotification.setBatteryFromBle(status)
                 updateBattery()
-            }
-        }
-    }
-
-    private val bleStatusListener""", """                // Renew only while this explicitly selected address broadcasts.
+            }""", """            if (status.address == manualBleAddress &&
+                android.os.SystemClock.elapsedRealtime() < manualBleExpiryMs && !isConnectedLocally) {
+                // Renew only while this explicitly selected address broadcasts.
                 manualBleExpiryMs = android.os.SystemClock.elapsedRealtime() + 60_000L
                 manualBleResetTask?.let { task ->
                     manualBleHandler.removeCallbacks(task)
@@ -32,11 +32,7 @@ modify("services/AirPodsService.kt", """                batteryNotification.setB
                 }
                 batteryNotification.setBatteryFromBle(status)
                 updateBattery()
-            }
-        }
-    }
-
-    private val bleStatusListener""")
+            }""")
 
 # A single explicit tap can choose the only nearby Pro 3 BLE announcement.
 # Multiple nearby devices require the user to select one manually.
