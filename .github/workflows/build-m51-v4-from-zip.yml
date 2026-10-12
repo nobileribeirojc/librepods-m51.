@@ -1,0 +1,57 @@
+name: Build LibrePods M51 v4 APK
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - LibrePods-M51-v4-pronto-para-compilar.zip
+      - .github/workflows/build-m51-v4-from-zip.yml
+permissions:
+  contents: read
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract original LibrePods M51 v4 project
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s LibrePods-M51-v4-pronto-para-compilar.zip
+          unzip -q LibrePods-M51-v4-pronto-para-compilar.zip -d source
+          test -f source/LibrePods-M51-v4/android/settings.gradle.kts
+          test -f source/LibrePods-M51-v4/android/app/src/main/java/me/kavishdevar/librepods/utils/CasePopupPolicy.kt
+          python3 source/LibrePods-M51-v4/tools/verify-m51-source.py
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Install Android SDK 35
+        run: sdkmanager --install 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Build experimental debug APK
+        working-directory: source/LibrePods-M51-v4/android
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleDebug --no-daemon --stacktrace
+      - name: Prepare downloadable APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=source/LibrePods-M51-v4/android/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          mkdir -p output
+          cp "$APK" output/LibrePods-M51-v4-debug.apk
+          (cd output && sha256sum LibrePods-M51-v4-debug.apk > SHA256SUMS.txt)
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: LibrePods-M51-v4-APK
+          path: output/
+          if-no-files-found: error
+          retention-days: 30
