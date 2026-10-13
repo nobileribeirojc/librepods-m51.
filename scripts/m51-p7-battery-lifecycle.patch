@@ -1,0 +1,775 @@
+--- a/android/app/src/main/java/me/kavishdevar/librepods/MainActivity.kt
++++ b/android/app/src/main/java/me/kavishdevar/librepods/MainActivity.kt
+@@ -166,6 +166,7 @@
+         listOf(
+             "android.permission.BLUETOOTH_CONNECT",
+             "android.permission.BLUETOOTH_SCAN",
++            "android.permission.ACCESS_COARSE_LOCATION",
+             "android.permission.ACCESS_FINE_LOCATION"
+         )
+     } else {
+@@ -292,16 +293,11 @@
+             }
+         }
+ 
+-        // Bluetooth may turn ON before the asynchronous service binder is ready.
+-        // Preserve one pending restart instead of silently dropping the event.
+-        val m51PendingBleRestart = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
+         val m51ServiceConnection = remember(context) {
+             object : ServiceConnection {
+                 override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+                     airPodsService.value = (binder as? AirPodsService.LocalBinder)?.getService()
+-                    if (m51PendingBleRestart.getAndSet(false)) {
+-                        airPodsService.value?.bleManager?.startScanning()
+-                    }
++
+                 }
+ 
+                 override fun onServiceDisconnected(name: ComponentName?) {
+@@ -313,29 +309,6 @@
+         // Bind only while the permissions-granted screen is composed, not at
+         // every redraw. Preserve the original LibrePods service and AACP.
+         DisposableEffect(context, m51ServiceConnection) {
+-            val bluetoothReceiver = object : BroadcastReceiver() {
+-                override fun onReceive(receiverContext: Context?, intent: Intent?) {
+-                    if (intent?.action == android.bluetooth.BluetoothAdapter.ACTION_STATE_CHANGED &&
+-                        intent.getIntExtra(
+-                            android.bluetooth.BluetoothAdapter.EXTRA_STATE,
+-                            android.bluetooth.BluetoothAdapter.ERROR
+-                        ) == android.bluetooth.BluetoothAdapter.STATE_ON
+-                    ) {
+-                        val currentService = airPodsService.value
+-                        if (currentService == null) {
+-                            m51PendingBleRestart.set(true)
+-                        } else {
+-                            currentService.bleManager?.startScanning()
+-                        }
+-                    }
+-                }
+-            }
+-            val btFilter = android.content.IntentFilter(android.bluetooth.BluetoothAdapter.ACTION_STATE_CHANGED)
+-            if (android.os.Build.VERSION.SDK_INT >= 33) {
+-                context.registerReceiver(bluetoothReceiver, btFilter, Context.RECEIVER_EXPORTED)
+-            } else {
+-                context.registerReceiver(bluetoothReceiver, btFilter)
+-            }
+             val bound = try {
+                 context.bindService(
+                     Intent(context, AirPodsService::class.java),
+@@ -347,8 +320,6 @@
+                 false
+             }
+             onDispose {
+-                try { context.unregisterReceiver(bluetoothReceiver) }
+-                catch (_: IllegalArgumentException) { }
+                 if (bound) {
+                     try { context.unbindService(m51ServiceConnection) }
+                     catch (_: IllegalArgumentException) { }
+--- a/android/app/src/main/java/me/kavishdevar/librepods/composables/BatteryView.kt
++++ b/android/app/src/main/java/me/kavishdevar/librepods/composables/BatteryView.kt
+@@ -54,6 +54,6 @@
+             }
+         }
+         Text(if (service.aacpReady) "Bateria pelo canal AACP"
+-            else "≈ BLE próximo · identidade não verificada · resolução 10%")
++            else "≈ BLE próximo · não autenticado · fones: até 15 s; estojo: até 30 s")
+     }
+ }
+--- a/android/app/src/main/java/me/kavishdevar/librepods/composables/M51ConnectionStatus.kt
++++ b/android/app/src/main/java/me/kavishdevar/librepods/composables/M51ConnectionStatus.kt
+@@ -22,6 +22,10 @@
+         var disposed = false
+         fun refresh() {
+             try {
++                if (adapter == null || !adapter.isEnabled) {
++                    audio = "Bluetooth desligado ou indisponível"
++                    return
++                }
+                 val saved = context.getSharedPreferences("settings", Context.MODE_PRIVATE).getString("mac_address", null)
+                 val connected = proxies.values.flatMap { it.connectedDevices }.any {
+                     (saved != null && it.address == saved) ||
+@@ -60,7 +64,7 @@
+         if (Build.VERSION.SDK_INT >= 33) context.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
+         else context.registerReceiver(receiver, filter)
+         try {
+-            if (adapter == null || !adapter.isEnabled) audio = "Bluetooth desligado ou indisponível"
++            if (adapter == null) audio = "Bluetooth indisponível"
+             else {
+                 adapter.getProfileProxy(context, listener, BluetoothProfile.A2DP)
+                 adapter.getProfileProxy(context, listener, BluetoothProfile.HEADSET)
+--- a/android/app/src/main/java/me/kavishdevar/librepods/services/AirPodsService.kt
++++ b/android/app/src/main/java/me/kavishdevar/librepods/services/AirPodsService.kt
+@@ -190,67 +190,104 @@
+     private var handleIncomingCallOnceConnected = false
+ 
+     lateinit var bleManager: BLEManager
++    private var m51Started = false
++    private val m51EnvironmentReceiver = object : BroadcastReceiver() {
++        override fun onReceive(context: Context?, intent: Intent?) {
++            when (intent?.action) {
++                BluetoothAdapter.ACTION_STATE_CHANGED -> {
++                    if (intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR) == BluetoothAdapter.STATE_ON)
++                        bleManager.ensureScanning()
++                    else {
++                        bleManager.stopScanning()
++                        clearM51BleDisplay()
++                    }
++                }
++                android.location.LocationManager.MODE_CHANGED_ACTION -> bleManager.startScanning()
++                Intent.ACTION_SCREEN_OFF -> bleManager.restoreFilteredScan()
++                Intent.ACTION_SCREEN_ON -> bleManager.ensureScanning()
++            }
++        }
++    }
++
+     @Volatile private var lastAutomaticL2capAt = 0L
+     private val nearbyPopupPolicy = CasePopupPolicy()
+     private var popupWindowM51: PopupWindow? = null
+     private var popupAddressM51: String? = null
+ 
+-    // RPA addresses rotate: never treat public BLE as verified identity.
+-    @Volatile private var manualBleAddress: String? = null
+-    @Volatile private var manualBleExpiryMs: Long = 0L
++    // One owner of displayed public BLE state. Each component expires from its
++    // actual radio observation, never from receipt of an unrelated packet.
++    private var manualBleAddress: String? = null
++    private var manualBleExpiryMs = 0L
+     private val manualBleHandler = Handler(Looper.getMainLooper())
+-    private var manualBleResetTask: Runnable? = null
+-    private var lastManualBleUiMs = 0L
+-
+-    // Separate, explicitly UNVERIFIED BLE readings from AACP. Public addresses rotate.
+     private val m51AutoBatteryPolicy = M51AutoBatteryPolicy()
+-    private var m51AutoExpiry: Runnable? = null
+-    private var m51AutoAddress: String? = null
+-    private var m51LastAutoUiMs = 0L
++    private var m51Displayed: BLEManager.AirPodsStatus? = null
++    private var m51Published: BLEManager.AirPodsStatus? = null
+     private var m51LastBondMs = -10_000L
+     private var m51HasBond = false
+-
+-    /** One selected public BLE candidate, for sixty seconds only; no pairing claim. */
++    private var m51BatteryTickScheduled = false
++    private val m51BatteryTick = object : Runnable {
++        override fun run() {
++            m51BatteryTickScheduled = false
++            publishM51Ble()
++            if (m51Displayed != null) scheduleM51BatteryTick()
++        }
++    }
++
++    private fun scheduleM51BatteryTick() {
++        if (m51BatteryTickScheduled) return
++        m51BatteryTickScheduled = true
++        manualBleHandler.postDelayed(m51BatteryTick, 1_000L)
++    }
++
++    private fun clearM51BleDisplay() {
++        m51Displayed = null
++        m51Published = null
++        manualBleAddress = null
++        RootlessDiagnostics.displayedBattery = "Nenhuma leitura BLE atual"
++        if (!(isConnectedLocally && aacpReady)) {
++            batteryNotification.clearPublicBleBattery()
++            updateBattery()
++        }
++    }
++
++    private fun publishM51Ble() {
++        val now = android.os.SystemClock.elapsedRealtime()
++        if (manualBleAddress != null && now >= manualBleExpiryMs) manualBleAddress = null
++        val original = m51Displayed ?: return
++        val fresh = original.fresh(now)
++        if (!(isConnectedLocally && aacpReady)) {
++            val old = m51Published
++            if (old == null || old.leftBattery != fresh.leftBattery || old.rightBattery != fresh.rightBattery ||
++                old.caseBattery != fresh.caseBattery || old.isLeftCharging != fresh.isLeftCharging ||
++                old.isRightCharging != fresh.isRightCharging || old.isCaseCharging != fresh.isCaseCharging) {
++                batteryNotification.setBatteryFromBle(fresh)
++                updateBattery()
++                m51Published = fresh
++            }
++        }
++        popupWindowM51?.takeIf { it.isShowing && popupAddressM51 == fresh.address }?.updateBle(fresh, true)
++        RootlessDiagnostics.recordDisplayed(fresh, now, manualBleAddress != null)
++        if (fresh.leftBattery == null && fresh.rightBattery == null && fresh.caseBattery == null) m51Displayed = null
++    }
++
+     fun displaySelectedBleBattery(): Boolean {
+         val candidate = RootlessDiagnostics.selectedStatus() ?: return false
+-        if (isConnectedLocally || candidate.model != "AirPods Pro 3") return false
++        if ((isConnectedLocally && aacpReady) || candidate.model != "AirPods Pro 3") return false
++        manualBleAddress = candidate.address
++        manualBleExpiryMs = android.os.SystemClock.elapsedRealtime() + 60_000L
++        m51Displayed = candidate
++        publishM51Ble()
++        scheduleM51BatteryTick()
++        return true
++    }
++
++    private fun receiveManuallySelectedBleBattery(status: BLEManager.AirPodsStatus) {
+         val now = android.os.SystemClock.elapsedRealtime()
+-        manualBleAddress = candidate.address
++        if (now >= manualBleExpiryMs) manualBleAddress = null
++        if (status.address != manualBleAddress) return
+         manualBleExpiryMs = now + 60_000L
+-        batteryNotification.setBatteryFromBle(candidate)
+-        updateBattery()
+-        manualBleResetTask?.let { manualBleHandler.removeCallbacks(it) }
+-        manualBleResetTask = Runnable {
+-            manualBleAddress = null
+-            manualBleExpiryMs = 0L
+-            if (!isConnectedLocally) {
+-                batteryNotification.clearPublicBleBattery()
+-                updateBattery()
+-            }
+-        }.also { manualBleHandler.postDelayed(it, 60_000L) }
+-        return true
+-    }
+-
+-    private fun receiveManuallySelectedBleBattery(status: BLEManager.AirPodsStatus) {
+-        if (status.address != manualBleAddress ||
+-            android.os.SystemClock.elapsedRealtime() >= manualBleExpiryMs) return
+-        manualBleHandler.post {
+-            if (status.address == manualBleAddress &&
+-                android.os.SystemClock.elapsedRealtime() < manualBleExpiryMs && !isConnectedLocally) {
+-                // Renew only while this explicitly selected address broadcasts.
+-                manualBleExpiryMs = android.os.SystemClock.elapsedRealtime() + 60_000L
+-                manualBleResetTask?.let { task ->
+-                    manualBleHandler.removeCallbacks(task)
+-                    manualBleHandler.postDelayed(task, 60_000L)
+-                }
+-                val now = android.os.SystemClock.elapsedRealtime()
+-                if (now - lastManualBleUiMs >= 1000L) {
+-                    lastManualBleUiMs = now
+-                    batteryNotification.setBatteryFromBle(status)
+-                    updateBattery()
+-                }
+-            }
+-        }
++        m51Displayed = status
++        scheduleM51BatteryTick()
+     }
+ 
+     @SuppressLint("MissingPermission")
+@@ -276,30 +313,17 @@
+             m51LastBondMs = now
+         }
+         val decision = m51AutoBatteryPolicy.observe(status.address, rssiDbm, m51HasBond, now)
+-        if (decision != M51AutoBatteryPolicy.Decision.CHOSEN_SOURCE) return
+-        manualBleHandler.post {
+-            // Never replace an explicitly selected source or a working AACP channel.
+-            if (manualBleAddress != null || (isConnectedLocally && aacpReady)) return@post
+-            val uiNow = android.os.SystemClock.elapsedRealtime()
+-            if (m51AutoAddress == status.address && uiNow - m51LastAutoUiMs < 1_000L) return@post
+-            m51LastAutoUiMs = uiNow
+-            m51AutoAddress = status.address
+-            batteryNotification.setBatteryFromBle(status)
+-            updateBattery()
+-            RootlessDiagnostics.autoBatteryUpdates.incrementAndGet()
+-            m51AutoExpiry?.let { manualBleHandler.removeCallbacks(it) }
+-            m51AutoExpiry = Runnable {
+-                if (manualBleAddress == null && !(isConnectedLocally && aacpReady)) {
+-                    batteryNotification.clearPublicBleBattery()
+-                    updateBattery()
+-                }
+-                m51AutoAddress = null
+-            }.also { manualBleHandler.postDelayed(it, 15_000L) }
+-        }
++        RootlessDiagnostics.selectionState = decision.name
++        if (decision != M51AutoBatteryPolicy.Decision.CHOSEN_SOURCE || manualBleAddress != null) return
++        // Replace the entire snapshot on address change. Never stitch another
++        // advertiser's case into the current buds solely because the RSSI matches.
++        m51Displayed = status
++        RootlessDiagnostics.autoBatteryUpdates.incrementAndGet()
++        scheduleM51BatteryTick()
+     }
+ 
+     private fun receiveVerifiedBleBattery(status: BLEManager.AirPodsStatus) {
+-        if (isConnectedLocally) return
++        if (isConnectedLocally && aacpReady) return
+         batteryNotification.setBatteryFromBle(status)
+         updateBattery()
+         popupWindowM51?.takeIf { it.isShowing && popupAddressM51 == status.address }
+@@ -380,6 +404,7 @@
+             // Unverified broadcasts are not attributed to the authenticated paired identity.
+             if (!sharedPreferences.getBoolean("m51_nearby_popup_opt_in", false)) return
+             if (device.model != "AirPods Pro 3") return
++            if (m51Displayed?.address != device.address) return
+             if (popupWindowM51?.isShowing == true) {
+                 if (popupAddressM51 == device.address) popupWindowM51?.updateBle(device, true)
+                 return
+@@ -405,6 +430,16 @@
+     }
+     override fun onCreate() {
+         super.onCreate()
++        bleManager = BLEManager(this)
++        bleManager.setAirPodsStatusListener(bleStatusListener)
++        val environmentFilter = IntentFilter().apply {
++            addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
++            addAction(android.location.LocationManager.MODE_CHANGED_ACTION)
++            addAction(Intent.ACTION_SCREEN_ON)
++            addAction(Intent.ACTION_SCREEN_OFF)
++        }
++        if (Build.VERSION.SDK_INT >= 33) registerReceiver(m51EnvironmentReceiver, environmentFilter, Context.RECEIVER_EXPORTED)
++        else registerReceiver(m51EnvironmentReceiver, environmentFilter)
+         sharedPreferencesLogs = getSharedPreferences("packet_logs", MODE_PRIVATE)
+ 
+         inMemoryLogs.addAll(sharedPreferencesLogs.getStringSet(packetLogKey, emptySet()) ?: emptySet())
+@@ -508,10 +543,10 @@
+ 
+             override fun onProximityKeysReceived(proximityKeys: ByteArray) {
+                 val keys = aacpManager.parseProximityKeysResponse(proximityKeys)
+-                Log.d("AirPodsParser", "Proximity keys: $keys")
++                Log.d("AirPodsParser", "Proximity keys received")
+                 sharedPreferences.edit {
+                     for (key in keys) {
+-                        Log.d("AirPodsParser", "Proximity key: ${key.key.name} = ${key.value}")
++                        // Never write IRK/encryption keys to exported logcat.
+                         putString(key.key.name, Base64.encode(key.value))
+                     }
+                 }
+@@ -854,8 +889,8 @@
+ 
+         val notification = NotificationCompat.Builder(this, "background_service_status")
+             .setSmallIcon(R.drawable.airpods)
+-            .setContentTitle("Background Service Running")
+-            .setContentText("Useless notification, disable it by clicking on it.")
++            .setContentTitle("LibrePods · monitor BLE ativo")
++            .setContentText("Busca de baterias em segundo plano; áudio Bluetooth independente.")
+             .setContentIntent(pendingIntentNotifDisable)
+             .setCategory(Notification.CATEGORY_SERVICE)
+             .setPriority(NotificationCompat.PRIORITY_LOW)
+@@ -1520,11 +1555,12 @@
+         Log.d("AirPodsService", "Service started")
+         ServiceManager.setService(this)
+         startForegroundNotification()
++        if (m51Started) {
++            bleManager.ensureScanning()
++            return START_STICKY
++        }
++        m51Started = true
+         initGestureDetector()
+-
+-        if (::bleManager.isInitialized) bleManager.stopScanning()
+-        bleManager = BLEManager(this)
+-        bleManager.setAirPodsStatusListener(bleStatusListener)
+ 
+         sharedPreferences = getSharedPreferences("settings", MODE_PRIVATE)
+ 
+@@ -1826,10 +1862,7 @@
+             clearPacketLogs()
+         }
+ 
+-        CoroutineScope(Dispatchers.IO).launch {
+-            bleManager.startScanning()
+-        }
+-
++        bleManager.ensureScanning()
+         return START_STICKY
+     }
+ 
+@@ -2305,10 +2338,10 @@
+ 
+     @SuppressLint("MissingPermission")
+     override fun onDestroy() {
+-        manualBleResetTask?.let { manualBleHandler.removeCallbacks(it) }
+-        m51AutoExpiry?.let { manualBleHandler.removeCallbacks(it) }
+-        m51AutoExpiry = null
+-        manualBleResetTask = null
++        unregisterReceiver(m51EnvironmentReceiver)
++        ServiceManager.setService(null)
++        manualBleHandler.removeCallbacksAndMessages(null)
++        m51Displayed = null
+         manualBleAddress = null
+         clearPacketLogs()
+         Log.d("AirPodsService", "Service stopped is being destroyed for some reason!")
+--- a/android/app/src/main/java/me/kavishdevar/librepods/utils/BLEManager.kt
++++ b/android/app/src/main/java/me/kavishdevar/librepods/utils/BLEManager.kt
+@@ -57,8 +57,27 @@
+         val isCaseCharging: Boolean = false,
+         val lidOpen: Boolean = false,
+         val color: String = "Unknown",
+-        val connectionState: String = "Unknown"
+-    )
++        val connectionState: String = "Unknown",
++        val observedMs: Long? = null,
++        val leftObservedMs: Long? = null,
++        val rightObservedMs: Long? = null,
++        val caseObservedMs: Long? = null
++    ) {
++        fun fresh(now: Long): AirPodsStatus {
++            // Timestamp-null values belong to the preserved authenticated path.
++            if (observedMs == null) return this
++            fun live(level: Int?, at: Long?, ttl: Long) = level?.takeIf {
++                at != null && now >= at && now - at < ttl
++            }
++            val l = live(leftBattery, leftObservedMs, 15_000L)
++            val r = live(rightBattery, rightObservedMs, 15_000L)
++            val c = live(caseBattery, caseObservedMs, 30_000L)
++            return copy(leftBattery = l, rightBattery = r, caseBattery = c,
++                isLeftCharging = isLeftCharging && l != null && M51AdvertisementTime.isFresh(observedMs, now),
++                isRightCharging = isRightCharging && r != null && M51AdvertisementTime.isFresh(observedMs, now),
++                isCaseCharging = isCaseCharging && c != null && M51AdvertisementTime.isFresh(observedMs, now))
++        }
++    }
+ 
+     fun getMostRecentStatus(): AirPodsStatus? {
+         return deviceStatusMap.values.maxByOrNull { it.lastSeen }
+@@ -74,12 +93,23 @@
+         fun onNearbyProximityAdvertisement(device: AirPodsStatus, rssiDbm: Int)
+     }
+ 
+-    private val publicCaseCache = PublicCaseCache()
++    private val publicHistory = M51BatteryHistory()
+     private var lastScanStartMs: Long? = null
+     private val m51ScanPolicy = M51ScanRecoveryPolicy()
+     private var m51RetryTask: Runnable? = null
+     private var m51FilterWatchdog: Runnable? = null
+     private var m51StoppedByUser = false
++    private var m51Unfiltered = false
++
++    fun ensureScanning() {
++        if (Looper.myLooper() != Looper.getMainLooper()) { cleanupHandler.post { ensureScanning() }; return }
++        if (mScanCallback == null && m51RetryTask == null) startScanning()
++    }
++
++    fun restoreFilteredScan() {
++        if (m51Unfiltered) startScanning(false)
++    }
++
+     private var mBluetoothLeScanner: BluetoothLeScanner? = null
+     private var mScanCallback: ScanCallback? = null
+     private var airPodsStatusListener: AirPodsStatusListener? = null
+@@ -134,6 +164,7 @@
+     @SuppressLint("MissingPermission")
+     @Synchronized
+     fun startScanning(unfiltered: Boolean = false) {
++        if (Looper.myLooper() != Looper.getMainLooper()) { cleanupHandler.post { startScanning(unfiltered) }; return }
+         m51StoppedByUser = false
+         m51RetryTask?.let { cleanupHandler.removeCallbacks(it) }
+         m51RetryTask = null
+@@ -153,6 +184,19 @@
+         try {
+             Log.d(TAG, "Starting BLE scanner")
+ 
++            val required = listOf(android.Manifest.permission.BLUETOOTH_SCAN,
++                android.Manifest.permission.BLUETOOTH_CONNECT, android.Manifest.permission.ACCESS_FINE_LOCATION)
++            val missing = required.filter { context.checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED }
++            if (missing.isNotEmpty()) {
++                stopScanning()
++                RootlessDiagnostics.scanStatus = "Permissões ausentes: " + missing.joinToString { it.substringAfterLast('.') }
++                return
++            }
++            if (context.getSystemService(android.location.LocationManager::class.java)?.isLocationEnabled != true) {
++                stopScanning()
++                RootlessDiagnostics.scanStatus = "Ative Localização do Android para receber anúncios BLE"
++                return
++            }
+             val btManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+             val btAdapter = btManager.adapter
+ 
+@@ -193,10 +237,12 @@
+ 
+             mScanCallback = object : ScanCallback() {
+                 override fun onScanResult(callbackType: Int, result: ScanResult) {
++                    if (mScanCallback !== this || m51StoppedByUser) return
+                     processScanResult(result)
+                 }
+ 
+                 override fun onBatchScanResults(results: List<ScanResult>) {
++                    if (mScanCallback !== this || m51StoppedByUser) return
+                     processedAddresses.clear()
+                     for (result in results) {
+                         processScanResult(result)
+@@ -228,6 +274,7 @@
+                 Log.w(TAG, "BLE scan not started: scanner unavailable")
+                 return
+             }
++            m51Unfiltered = unfiltered
+             val proximityCountBefore = RootlessDiagnostics.proximity.get()
+             scanner.startScan(if (unfiltered) emptyList() else listOf(scanFilter), scanSettings, mScanCallback)
+             // Record the cooldown only after the Android scanner accepted startScan.
+@@ -241,7 +288,8 @@
+                 m51FilterWatchdog = Runnable {
+                     m51FilterWatchdog = null
+                     if (mScanCallback === currentCallback &&
+-                        RootlessDiagnostics.proximity.get() == proximityCountBefore && !m51StoppedByUser) {
++                        RootlessDiagnostics.proximity.get() == proximityCountBefore && !m51StoppedByUser &&
++                        context.getSystemService(android.os.PowerManager::class.java)?.isInteractive == true) {
+                         RootlessDiagnostics.scanStatus = "Filtro Apple sem respostas; tentando BLE sem filtro"
+                         startScanning(unfiltered = true)
+                     }
+@@ -250,7 +298,8 @@
+             Log.d(TAG, "BLE scanner started successfully")
+ 
+             cleanupHandler.postDelayed(cleanupRunnable, CLEANUP_INTERVAL_MS)
+-        } catch (t: Throwable) {
++        } catch (t: Exception) {
++            mScanCallback = null
+             RootlessDiagnostics.scanStatus = "Erro BLE: ${t.javaClass.simpleName}"
+             Log.e(TAG, "Error starting BLE scanner", t)
+         }
+@@ -259,24 +308,18 @@
+     @SuppressLint("MissingPermission")
+     @Synchronized
+     fun stopScanning() {
++        if (Looper.myLooper() != Looper.getMainLooper()) { cleanupHandler.post { stopScanning() }; return }
+         m51StoppedByUser = true
+         m51RetryTask?.let { cleanupHandler.removeCallbacks(it) }
+         m51FilterWatchdog?.let { cleanupHandler.removeCallbacks(it) }
+         m51RetryTask = null
+         m51FilterWatchdog = null
+-        lastScanStartMs = null
+-        try {
+-            if (mBluetoothLeScanner != null && mScanCallback != null) {
+-                Log.d(TAG, "Stopping BLE scanner")
+-                mBluetoothLeScanner?.stopScan(mScanCallback)
+-                mScanCallback = null
+-            }
+-
+-            cleanupHandler.removeCallbacks(cleanupRunnable)
+-            RootlessDiagnostics.scanStatus = "Busca BLE interrompida"
+-        } catch (t: Throwable) {
+-            Log.e(TAG, "Error stopping BLE scanner", t)
+-        }
++        cleanupHandler.removeCallbacks(cleanupRunnable)
++        val callback = mScanCallback
++        mScanCallback = null
++        try { if (callback != null) mBluetoothLeScanner?.stopScan(callback) }
++        catch (e: Exception) { Log.w(TAG, "Cannot stop old scan", e) }
++        RootlessDiagnostics.scanStatus = "Busca BLE interrompida"
+     }
+ 
+     @OptIn(ExperimentalEncodingApi::class)
+@@ -320,6 +363,12 @@
+     private fun processScanResult(result: ScanResult) {
+         try {
+             RootlessDiagnostics.total.incrementAndGet()
++            val observedAt = result.timestampNanos / 1_000_000L
++            val now = android.os.SystemClock.elapsedRealtime()
++            if (!M51AdvertisementTime.isFresh(observedAt, now)) {
++                RootlessDiagnostics.stale.incrementAndGet()
++                return
++            }
+             val scanRecord = result.scanRecord ?: return
+             val address = result.device.address
+ 
+@@ -332,7 +381,7 @@
+             }
+             RootlessDiagnostics.proximity.incrementAndGet()
+             m51ScanPolicy.appleSeen()
+-            val publicStatus = parseProximityMessage(address, manufacturerData)
++            val publicStatus = parseProximityMessage(address, manufacturerData, observedAt)
+             RootlessDiagnostics.observe(publicStatus)
+             if (!verifiedAddresses.contains(address)) {
+                 val irk = getIrkFromPreferences()
+@@ -353,7 +402,7 @@
+             val parsedStatus = if (decryptedData != null && decryptedData.size == 16) {
+                 parseProximityMessageWithDecryption(address, manufacturerData, decryptedData)
+             } else {
+-                parseProximityMessage(address, manufacturerData)
++                publicStatus
+             }
+ 
+             val previousStatus = deviceStatusMap[address]
+@@ -504,13 +553,16 @@
+         }
+     }
+ 
+-    private fun parseProximityMessage(address: String, data: ByteArray): AirPodsStatus {
++    private fun parseProximityMessage(address: String, data: ByteArray, observedMs: Long): AirPodsStatus {
+         val reading = requireNotNull(PublicProximity.decode(data))
+-        val caseLevel = publicCaseCache.read(address, reading.case, android.os.SystemClock.elapsedRealtime())
++        val history = publicHistory.observe(address, reading, observedMs, android.os.SystemClock.elapsedRealtime())
++            ?: throw IllegalArgumentException("Out-of-order advertisement")
+         return AirPodsStatus(
+             address = address,
+             model = modelNames[reading.modelId] ?: "Unknown (${reading.modelId})",
+-            leftBattery = reading.left, rightBattery = reading.right, caseBattery = caseLevel,
++            leftBattery = history.left?.percent, rightBattery = history.right?.percent, caseBattery = history.case?.percent,
++            observedMs = observedMs, leftObservedMs = history.left?.observedMs,
++            rightObservedMs = history.right?.observedMs, caseObservedMs = history.case?.observedMs,
+             isLeftCharging = reading.leftCharging && reading.left != null,
+             isRightCharging = reading.rightCharging && reading.right != null,
+             // A cached level cannot establish the current charging state.
+--- a/android/app/src/main/java/me/kavishdevar/librepods/utils/M51AutoBatteryPolicy.kt
++++ b/android/app/src/main/java/me/kavishdevar/librepods/utils/M51AutoBatteryPolicy.kt
+@@ -14,11 +14,15 @@
+         candidates.entries.removeAll { nowMs < it.value.timeMs ||
+             nowMs - it.value.timeMs >= freshnessMs }
+         if (!candidates.containsKey(chosenAddress)) chosenAddress = null
+-        if (address.isNotBlank() && rssiDbm >= minimumRssiDbm) {
++        if (address.isNotBlank() && rssiDbm in minimumRssiDbm..0) {
+             candidates[address] = Candidate(nowMs, rssiDbm)
+         }
+-        if (!hasBondedAirPods) return Decision.NO_BOND
+-        if (address.isBlank() || rssiDbm < minimumRssiDbm) return Decision.WEAK_SIGNAL
++        while (candidates.size > 30) candidates.remove(candidates.minByOrNull { it.value.timeMs }!!.key)
++        if (!hasBondedAirPods) {
++            chosenAddress = null
++            return Decision.NO_BOND
++        }
++        if (address.isBlank() || rssiDbm !in minimumRssiDbm..0) return Decision.WEAK_SIGNAL
+ 
+         // Approach inspired by OpenPods' strongest-recent-advert logic,
+         // reimplemented independently with 8 dBm hysteresis. Proximity is NOT identity!
+--- /dev/null
++++ b/android/app/src/main/java/me/kavishdevar/librepods/utils/M51BatteryHistory.kt
+@@ -0,0 +1,32 @@
++/* LibrePods M51, AGPL-3.0-or-later. Independent public BLE history; no identity inference. */
++package me.kavishdevar.librepods.utils
++
++internal object M51AdvertisementTime {
++    fun isFresh(observedMs: Long, nowMs: Long): Boolean =
++        observedMs >= 0 && nowMs >= observedMs && nowMs - observedMs < 15_000L
++}
++
++internal class M51BatteryHistory {
++    data class Value(val percent: Int, val observedMs: Long)
++    data class Snapshot(val left: Value?, val right: Value?, val case: Value?) {
++        fun fresh(now: Long) = Snapshot(live(left, now, 15_000), live(right, now, 15_000), live(case, now, 30_000))
++        companion object {
++            private fun live(v: Value?, now: Long, ttl: Long) = v?.takeIf { now >= it.observedMs && now - it.observedMs < ttl }
++        }
++    }
++    private data class Entry(val at: Long, val snapshot: Snapshot)
++    private val entries = linkedMapOf<String, Entry>()
++
++    fun observe(address: String, r: PublicProximity.Reading, at: Long, now: Long): Snapshot? {
++        if (!M51AdvertisementTime.isFresh(at, now)) return null
++        entries.entries.removeAll { now < it.value.at || now - it.value.at >= 30_000L }
++        val old = entries[address]
++        if (old != null && at < old.at) return null
++        val previous = old?.snapshot?.fresh(now)
++        fun value(n: Int?, previous: Value?) = n?.takeIf { it in 0..100 }?.let { Value(it, at) } ?: previous
++        val result = Snapshot(value(r.left, previous?.left), value(r.right, previous?.right), value(r.case, previous?.case)).fresh(now)
++        entries[address] = Entry(at, result)
++        while (entries.size > 30) entries.remove(entries.keys.first())
++        return result
++    }
++}
+--- a/android/app/src/main/java/me/kavishdevar/librepods/utils/RootlessDiagnostics.kt
++++ b/android/app/src/main/java/me/kavishdevar/librepods/utils/RootlessDiagnostics.kt
+@@ -13,6 +13,17 @@
+     private const val PRUNE_MS = 60_000L
+     private const val MAX_CANDIDATES = 30
+ 
++    val stale = AtomicInteger()
++    @Volatile var selectionState = "Aguardando anúncio Pro 3"
++    @Volatile var displayedBattery = "Nenhuma leitura BLE atual"
++    fun recordDisplayed(s: BLEManager.AirPodsStatus, now: Long, manual: Boolean) {
++        fun value(n: Int?, at: Long?): String = n?.let {
++            "≈$it% (idade ${at?.let { time -> (now - time).coerceAtLeast(0) / 1000 } ?: 0}s)"
++        } ?: "—"
++        displayedBattery = "Fonte: ${if (manual) "manual" else "automática por proximidade"}; modelo ${s.model}; identidade não autenticada\n" +
++            "Esquerdo: ${value(s.leftBattery, s.leftObservedMs)}\nDireito: ${value(s.rightBattery, s.rightObservedMs)}\n" +
++            "Estojo: ${value(s.caseBattery, s.caseObservedMs)}"
++    }
+     val total = AtomicInteger()
+     val apple = AtomicInteger()
+     val proximity = AtomicInteger()
+@@ -130,7 +141,7 @@
+         prune()
+         val candidate = candidates[selected] ?: return null
+         if (SystemClock.elapsedRealtime() - candidate.seenAt > FRESH_MS) return null
+-        return candidate.status
++        return candidate.status.fresh(SystemClock.elapsedRealtime())
+     }
+ 
+     @Synchronized fun battery(): String {
+@@ -151,6 +162,9 @@
+ Patch de segurança: ${android.os.Build.VERSION.SECURITY_PATCH}
+ $scanStatus
+ Anúncios BLE: ${total.get()}
++Anúncios antigos descartados: ${stale.get()}
++Seleção automática: $selectionState
++$displayedBattery
+ Anúncios Apple: ${apple.get()}
+ Mensagens de proximidade: ${proximity.get()}
+ Anúncios Apple ignorados (outro formato ou inválidos): ${rejected.get()}
+--- /dev/null
++++ b/android/app/src/test/java/me/kavishdevar/librepods/utils/M51BatteryPipelineTest.kt
+@@ -0,0 +1,82 @@
++package me.kavishdevar.librepods.utils
++
++import org.junit.Assert.*
++import org.junit.Test
++
++/** Synthetic radio events. These are not captures or a physical M51 test. */
++class M51BatteryPipelineTest {
++    private fun frame(pods: Int = 0x38, case: Int = 1, status: Int = 0x64) = ByteArray(27).apply {
++        this[0] = 7; this[1] = 25; this[2] = 1; this[3] = 0x27; this[4] = 0x20
++        this[5] = status.toByte(); this[6] = pods.toByte(); this[7] = case.toByte()
++    }
++    private fun reading(pods: Int = 0x38, case: Int = 1, status: Int = 0x64) = PublicProximity.decode(frame(pods, case, status))!!
++    @Test fun publicAdvertReachesAutomaticThreeComponentSnapshotWithoutIrk() {
++        val history = M51BatteryHistory()
++        val policy = M51AutoBatteryPolicy()
++        val decoded = PublicProximity.decode(PublicProximity.frame(frame())!!)!!
++        assertEquals(0x2720, decoded.modelId)
++        assertEquals(M51AutoBatteryPolicy.Decision.CHOSEN_SOURCE, policy.observe("A", -50, true, 1000))
++        val snapshot = history.observe("A", decoded, 1000, 1000)!!
++        assertEquals(80, snapshot.left?.percent); assertEquals(30, snapshot.right?.percent); assertEquals(10, snapshot.case?.percent)
++    }
++    @Test fun missingLeftDoesNotEraseRecentReadingOrRenewItsTimestamp() {
++        val h = M51BatteryHistory()
++        h.observe("A", reading(), 0, 0)
++        val s = h.observe("A", reading(pods = 0x4f, case = 15), 14000, 14000)!!
++        assertEquals(0L, s.left?.observedMs); assertEquals(14000L, s.right?.observedMs)
++        assertNull(s.fresh(15000).left); assertEquals(40, s.fresh(15000).right?.percent)
++        assertEquals(10, s.fresh(29999).case?.percent); assertNull(s.fresh(30000).case)
++    }
++    @Test fun noPacketsStillExpiresEachComponent() {
++        val s = M51BatteryHistory().observe("A", reading(), 1000, 1000)!!
++        assertNull(s.fresh(16000).left); assertNull(s.fresh(16000).right)
++        assertEquals(10, s.fresh(16000).case?.percent); assertNull(s.fresh(31000).case)
++    }
++    @Test fun changingAdvertiserNeverBorrowsCaseBattery() {
++        val h = M51BatteryHistory()
++        h.observe("A", reading(), 0, 0)
++        val s = h.observe("B", reading(case = 15), 100, 100)!!
++        assertEquals(80, s.left?.percent); assertNull(s.case)
++    }
++    @Test fun staleBatchesCannotReviveBattery() {
++        val h = M51BatteryHistory()
++        assertNull(h.observe("A", reading(), 100, 15100))
++        assertNull(h.observe("A", reading(), 200, 199))
++        assertNull(h.observe("A", reading(), -1, 100))
++    }
++    @Test fun outOfOrderPacketsCannotRewindValues() {
++        val h = M51BatteryHistory()
++        h.observe("A", reading(), 200, 200)
++        assertNull(h.observe("A", reading(pods = 0x00), 100, 300))
++        assertEquals(80, h.observe("A", reading(pods = 0xff), 400, 400)!!.left?.percent)
++    }
++    @Test fun realZeroSurvivesCacheAndUnknownDoesNotBecomeZero() {
++        val h = M51BatteryHistory()
++        val s = h.observe("A", reading(pods = 0xf0, case = 0), 0, 0)!!
++        assertEquals(0, s.left?.percent); assertNull(s.right); assertEquals(0, s.case?.percent)
++    }
++    @Test fun swappedPrimaryKeepsAnatomicalLeftAndRight() {
++        val h = M51BatteryHistory()
++        h.observe("A", reading(), 0, 0)
++        val s = h.observe("A", reading(pods = 0x83, status = 0x44), 1, 1)!!
++        assertEquals(80, s.left?.percent); assertEquals(30, s.right?.percent)
++    }
++    @Test fun oldCaseCannotBeRenewedByBudsUpdates() {
++        val h = M51BatteryHistory()
++        h.observe("A", reading(), 0, 0)
++        for (time in 1000L..29000L step 1000) h.observe("A", reading(case = 15), time, time)
++        assertNull(h.observe("A", reading(case = 15), 30000, 30000)!!.case)
++    }
++    @Test fun backwardsClockClearsHistory() {
++        val h = M51BatteryHistory()
++        h.observe("A", reading(), 9999, 9999)
++        assertNull(h.observe("A", reading(case = 15), 1, 1)!!.case)
++    }
++    @Test fun allNibbleCombinationsRespectOrientationAndUnknown() {
++        for (primary in listOf(0x64, 0x44)) for (a in 0..15) for (b in 0..15) {
++            val r = reading((a shl 4) or b, status = primary)
++            assertEquals(PublicProximity.percent(if (primary == 0x64) b else a), r.left)
++            assertEquals(PublicProximity.percent(if (primary == 0x64) a else b), r.right)
++        }
++    }
++}
