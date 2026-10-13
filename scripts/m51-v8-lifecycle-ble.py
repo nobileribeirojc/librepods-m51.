@@ -23,6 +23,7 @@ def exactly_one_replace(text: str, before: str, after: str, label: str) -> str:
 
 
 source = main.read_text(encoding="utf-8")
+print("M51_BASE_ANCHORS", [(i, line.strip()[:120]) for i, line in enumerate(source.splitlines(), 1) if any(k in line for k in ["onboardingComplete", "onboarding_complete", "fun bindService", "bindService()", "showOnboarding", "NavigationRoot", "serviceConnection", "connectionStatusReceiver"])])
 # The legacy code unbound in onStop AND onDestroy, even before lateinit initialization,
 # and re-bound on each Compose recomposition. This matches the M51 logcat.
 pattern = re.compile(
