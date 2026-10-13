@@ -1,0 +1,36 @@
+name: Audit M51 v8 Source (NO APK)
+on:
+  push:
+    branches: [m51-root-cause-audit]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  export-v8-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruct original LibrePods through v8
+        shell: bash
+        run: |
+          set -euo pipefail
+          unzip -q LibrePods-M51-v4-pronto-para-compilar.zip -d source
+          python3 source/LibrePods-M51-v4/tools/verify-m51-source.py
+          python3 scripts/fix-m51-unknown-battery.py source/LibrePods-M51-v4
+          python3 scripts/m51-v5-public-ble-preview.py source/LibrePods-M51-v4
+          python3 scripts/m51-v6-ble-continuo.py source/LibrePods-M51-v4
+          git apply --directory=source/LibrePods-M51-v4 scripts/m51-v7.patch
+          python3 scripts/m51-v8-lifecycle-ble.py source/LibrePods-M51-v4
+      - name: Package reconstructed source for inspection (no binary signing)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p audit
+          tar -C source/LibrePods-M51-v4/android -czf audit/m51-v8-reconstructed-android-source.tar.gz --exclude=build --exclude=.gradle app/src app/build.gradle.kts settings.gradle.kts gradle.properties gradle/libs.versions.toml app/src/main/AndroidManifest.xml
+          sha256sum audit/* > audit/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: m51-v8-reconstructed-source-audit
+          path: audit
+          retention-days: 7
