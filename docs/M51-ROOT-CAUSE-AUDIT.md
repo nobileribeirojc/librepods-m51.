@@ -24,6 +24,10 @@ Fonte: v4 original em ZIP + scripts v5, v6, patch v7 e script v8, reconstruídos
 
 **Licenças:** os repositórios públicos CAPod/OpenPods divulgam GPL-3.0 e a base do projeto M51 declara AGPL-3.0-or-later. A implementação nesta branch é independente e inspira-se em **ideias e formatos documentados**, não faz cópia direta de arquivos de terceiros. Conservar avisos/licenças dos componentes originais e revisar qualquer futura incorporação literal.
 
+## Continuidade da v9 (sem descartar melhorias anteriores)
+
+Esta branch reconstrói a base original **até a v8**, aplica também `scripts/m51-v9-ble-recovery.py` (recuperação do scanner BLE no Bluetooth ON) e só então executa os novos scripts de bateria, áudio e controle. Assim não perde a correção previamente compilada da v9. O CI executa apenas `:app:testDebugUnitTest` e **não publica APK**.
+
 ## Correções implementadas nesta branch de pesquisa
 
 - `scripts/m51-p0-source-fixes.py`: implementa recebimento automático **explicitamente não autenticado** da bateria BLE em `AirPodsService`, sem remover o caminho manual nem confundir BLE com AACP. Usa `M51AutoBatteryPolicy.kt`, uma heurística de proximidade inspirada no OpenPods (RSSI recente, histerese de 8 dBm, validade temporal), requer existência de AirPods pareado, e expira dados sem anúncios em 15 s. Nenhuma escolha de endereço por RSSI autentica propriedade do aparelho.
