@@ -1,9 +1,10 @@
-# LibrePods M51 — v7 experimental
+# LibrePods M51 — v8 experimental
 
 Adaptação do **código original do LibrePods** para Samsung Galaxy M51, Android 12,
 AirPods Pro 3, sem root. Mesmo applicationId das versões M51 anteriores.
 
 - Três baterias separadas e atualização da interface em Android 12.
+- Corrige associação repetida ao serviço na interface Compose e erros de desassociação; tenta reiniciar o scanner BLE quando o Bluetooth é ligado.
 - Leitura BLE pública aproximada, independente da conexão AACP.
 - Estado de áudio A2DP/HFP separado dos controles avançados.
 - Janela automática opcional, interpretação de anúncios testável e validade limitada.
@@ -16,12 +17,12 @@ não substituem esse teste.
 
 ## APK e validação
 
-[Compilação v7 no GitHub Actions](https://github.com/nobileribeirojc/librepods-m51./actions/runs/38414814243)
+[Compilações e APKs no GitHub Actions](https://github.com/nobileribeirojc/librepods-m51./actions)
 
-O artefato `LibrePods-M51-v7-BLE-APK` contém APK, SHA-256, relatório de assinatura,
-patch e documentação. Os testes ficam em `M51-v7-test-reports`.
+O artefato `LibrePods-M51-v8-BLE-APK` contém APK, SHA-256, relatório de assinatura,
+patch e documentação. Os testes ficam em `M51-v8-test-reports`.
 
-[Alterações, investigação L2CAP, fontes e roteiro de teste](docs/M51-V7.md).
+[Estabilização v8 e novo roteiro de teste](docs/M51-V8.md). [Investigação L2CAP e BLE v7](docs/M51-V7.md).
 
 ## Código e reprodução
 
@@ -32,6 +33,7 @@ O workflow extrai a base e aplica, nessa ordem:
 2. `scripts/m51-v5-public-ble-preview.py`
 3. `scripts/m51-v6-ble-continuo.py`
 4. `scripts/m51-v7.patch` (diff dos arquivos Kotlin/Gradle originais e novos testes).
+5. `scripts/m51-v8-lifecycle-ble.py` (ciclo de vida da Activity/serviço e retomada BLE após ligar Bluetooth).
 
 Compilação: JDK 17, SDK 35 e wrapper Gradle da base;
 `:app:testDebugUnitTest :app:assembleDebug`. Mantida licença AGPL-3.0-or-later da base.
