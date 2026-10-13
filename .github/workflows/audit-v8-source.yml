@@ -49,11 +49,11 @@ jobs:
           packages: platform-tools
       - name: Install SDK platform 35
         run: sdkmanager --install 'platforms;android-35' 'build-tools;35.0.0'
-      - name: Run JVM unit tests and compile code (NO APK)
+      - name: Run JVM unit tests and assemble debug APK locally (NOT published)
         working-directory: source/LibrePods-M51-v4/android
         run: |
           chmod +x gradlew
-          ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
+          ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon --stacktrace
       - name: Package reconstructed source for inspection (no binary signing)
         shell: bash
         run: |
