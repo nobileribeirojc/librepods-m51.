@@ -23,6 +23,8 @@ def exactly_one_replace(text: str, before: str, after: str, label: str) -> str:
 
 
 source = main.read_text(encoding="utf-8")
+if 'import androidx.compose.runtime.DisposableEffect' not in source and 'import androidx.compose.runtime.*' not in source:
+    source = exactly_one_replace(source, 'import android.util.Log', 'import android.util.Log\nimport androidx.compose.runtime.DisposableEffect', 'DisposableEffect import')
 # The legacy code unbound in onStop AND onDestroy, even before lateinit initialization,
 # and re-bound on each Compose recomposition. This matches the M51 logcat.
 pattern = re.compile(
