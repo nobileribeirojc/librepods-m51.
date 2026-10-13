@@ -22,6 +22,24 @@ jobs:
           python3 scripts/m51-v6-ble-continuo.py source/LibrePods-M51-v4
           git apply --directory=source/LibrePods-M51-v4 scripts/m51-v7.patch
           python3 scripts/m51-v8-lifecycle-ble.py source/LibrePods-M51-v4
+      - name: Apply audited auto-battery and audio fixes (no version bump)
+        run: python3 scripts/m51-p0-source-fixes.py source/LibrePods-M51-v4
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - name: Install SDK platform 35
+        run: sdkmanager --install 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Run JVM unit tests and compile code (NO APK)
+        working-directory: source/LibrePods-M51-v4/android
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
       - name: Package reconstructed source for inspection (no binary signing)
         shell: bash
         run: |
@@ -31,6 +49,6 @@ jobs:
           sha256sum audit/* > audit/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: m51-v8-reconstructed-source-audit
+          name: m51-audited-source-not-apk
           path: audit
           retention-days: 7
