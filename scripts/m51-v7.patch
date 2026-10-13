@@ -475,6 +475,15 @@
      var isConnectedLocally = false
      var device: BluetoothDevice? = null
  
+@@ -836,7 +843,7 @@
+             .setContentTitle("AirPods Connection Issue")
+             .setContentText("Unable to connect to AirPods over L2CAP")
+             .setStyle(NotificationCompat.BigTextStyle()
+-                .bigText("Your AirPods are connected via Bluetooth, but LibrePods couldn't connect to AirPods using L2CAP. " +
++                .bigText("Falha no canal de controle L2CAP. A conexão de áudio Bluetooth é independente. " +
+                          "Error: $errorMessage"))
+             .setContentIntent(pendingIntent)
+             .setCategory(Notification.CATEGORY_ERROR)
 @@ -922,9 +929,9 @@
  
              it.setTextViewText(
@@ -520,7 +529,58 @@
          updateBatteryWidget()
          sendBatteryBroadcast()
          sendBatteryNotification()
-@@ -1852,7 +1859,14 @@
+@@ -1079,10 +1086,10 @@
+             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+         )
+ 
+-        if (!::socket.isInitialized) {
+-            return
+-        }
+-        if (connected && socket.isConnected) {
++        val controlConnected = connected && aacpReady && ::socket.isInitialized && socket.isConnected
++        val bleValues = batteryList ?: batteryNotification.getBattery()
++        val hasBleReading = !isConnectedLocally && bleValues.any { it.status != BatteryStatus.DISCONNECTED }
++        if (controlConnected) {
+             updatedNotification = NotificationCompat.Builder(this, "airpods_connection_status")
+                 .setSmallIcon(R.drawable.airpods)
+                 .setContentTitle(airpodsName ?: config.deviceName)
+@@ -1121,11 +1128,22 @@
+             notificationManager.notify(2, updatedNotification)
+ 
+             notificationManager.cancel(1)
+-        } else if (!connected) {
++        } else if (hasBleReading) {
++            fun value(component: Int): String = bleValues.find { it.component == component }
++                ?.takeIf { it.status != BatteryStatus.DISCONNECTED }?.let { "≈ ${it.level}%" } ?: "—"
++            updatedNotification = NotificationCompat.Builder(this, "airpods_connection_status")
++                .setSmallIcon(R.drawable.airpods)
++                .setContentTitle("Bateria BLE · controle AACP indisponível")
++                .setContentText("E: ${value(BatteryComponent.LEFT)}  D: ${value(BatteryComponent.RIGHT)}  Estojo: ${value(BatteryComponent.CASE)}")
++                .setContentIntent(pendingIntent)
++                .setOnlyAlertOnce(true)
++                .setOngoing(true).build()
++            notificationManager.notify(2, updatedNotification)
++        } else {
+             updatedNotification = NotificationCompat.Builder(this, "background_service_status")
+                 .setSmallIcon(R.drawable.airpods)
+-                .setContentTitle("AirPods not connected")
+-                .setContentText("Tap to open app")
++                .setContentTitle("LibrePods · aguardando dados")
++                .setContentText("Áudio Bluetooth é independente do controle AACP")
+                 .setContentIntent(pendingIntent)
+                 .setCategory(Notification.CATEGORY_SERVICE)
+                 .setPriority(NotificationCompat.PRIORITY_LOW)
+@@ -1134,9 +1152,6 @@
+ 
+             notificationManager.notify(1, updatedNotification)
+             notificationManager.cancel(2)
+-        } else if (!socket.isConnected && isConnectedLocally) {
+-            Log.d("AirPodsService", "<LogCollector:Complete:Failed> Socket not connected")
+-            showSocketConnectionFailureNotification("Socket created, but not connected. Is the Bluetooth process hooked?")
+         }
+     }
+ 
+@@ -1852,7 +1867,14 @@
          CrossDevice.isAvailable = false
      }
  
@@ -536,7 +596,7 @@
          val type = 3 // L2CAP
          val constructorSpecs = listOf(
              arrayOf(device, type, true, true, 0x1001, uuid),
-@@ -1894,7 +1908,7 @@
+@@ -1894,7 +1916,7 @@
  
      @RequiresApi(Build.VERSION_CODES.R)
      @SuppressLint("MissingPermission", "UnspecifiedRegisterReceiverFlag")
@@ -545,7 +605,7 @@
          if (!l2capAttemptRunning.compareAndSet(false, true)) {
              // Do not spawn simultaneous classic L2CAP sockets for the same AirPods.
              return
-@@ -1909,6 +1923,7 @@
+@@ -1909,6 +1931,7 @@
              return
          }
          RootlessDiagnostics.beginConnection()
@@ -553,7 +613,7 @@
          Log.d("AirPodsService", "<LogCollector:Start> Connecting to socket")
          try {
              HiddenApiBypass.addHiddenApiExemptions("Landroid/bluetooth/BluetoothSocket;")
-@@ -1920,7 +1935,7 @@
+@@ -1920,7 +1943,7 @@
          val uuid: ParcelUuid = ParcelUuid.fromString("74ec2172-0bad-4d01-8f77-997b2be0722a")
          if (isConnectedLocally != true && !CrossDevice.isAvailable) {
              socket = try {
@@ -562,7 +622,7 @@
              } catch (e: Exception) {
                  RootlessDiagnostics.fail("Criação do socket", e)
                  Log.e("AirPodsService", "Failed to create BluetoothSocket: ${e.message}")
-@@ -1930,14 +1945,16 @@
+@@ -1930,14 +1953,16 @@
  
              try {
                  runBlocking {
@@ -582,7 +642,7 @@
                              try { connectingSocket.connect() } finally { watchdog.cancel() }
                              RootlessDiagnostics.connected()
  
-@@ -1965,13 +1982,14 @@
+@@ -1965,13 +1990,14 @@
                      }
                  }
                  this@AirPodsService.device = device
@@ -598,7 +658,15 @@
                          aacpManager.sendPacket(aacpManager.createHandshakePacket())
                          delay(200)
                          aacpManager.sendSetFeatureFlagsPacket()
-@@ -1988,13 +2006,8 @@
+@@ -1981,6 +2007,7 @@
+                         aacpManager.sendRequestProximityKeys((AACPManager.Companion.ProximityKeyType.IRK.value+AACPManager.Companion.ProximityKeyType.ENC_KEY.value).toByte())
+                         if (!handleIncomingCallOnceConnected) startHeadTracking() else handleIncomingCall()
+                         Handler(Looper.getMainLooper()).postDelayed({
++                            if (!sessionSocket.isConnected || BluetoothConnectionManager.getCurrentSocket() !== sessionSocket) return@postDelayed
+                             aacpManager.sendPacket(aacpManager.createHandshakePacket())
+                             aacpManager.sendSetFeatureFlagsPacket()
+                             aacpManager.sendNotificationRequest()
+@@ -1988,13 +2015,8 @@
                              if (!handleIncomingCallOnceConnected) stopHeadTracking()
                          }, 5000)
  
@@ -614,7 +682,7 @@
                                  val buffer = ByteArray(1024)
                                  val bytesRead = it.inputStream.read(buffer)
                                  var data: ByteArray = byteArrayOf()
-@@ -2002,6 +2015,13 @@
+@@ -2002,6 +2024,13 @@
                                      RootlessDiagnostics.controlPackets.incrementAndGet()
                                      RootlessDiagnostics.stage("Pacotes AACP recebidos: comunicação bidirecional")
                                      data = buffer.copyOfRange(0, bytesRead)
@@ -628,7 +696,7 @@
                                      sendBroadcast(Intent(AirPodsNotifications.AIRPODS_DATA).apply {
                                          putExtra("data", buffer.copyOfRange(0, bytesRead))
                                      })
-@@ -2028,17 +2048,25 @@
+@@ -2028,17 +2057,25 @@
                                  }
                              }
                          }
