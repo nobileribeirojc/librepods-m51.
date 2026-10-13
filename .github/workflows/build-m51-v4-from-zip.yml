@@ -18,25 +18,11 @@ jobs:
     timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
-      - name: Extract original LibrePods M51 v4 project
+      - name: Reconstruct existing v8 source (shared local/CI script)
         shell: bash
         run: |
-          set -euo pipefail
-          test -s LibrePods-M51-v4-pronto-para-compilar.zip
-          unzip -q LibrePods-M51-v4-pronto-para-compilar.zip -d source
-          test -f source/LibrePods-M51-v4/android/settings.gradle.kts
-          test -f source/LibrePods-M51-v4/android/app/src/main/java/me/kavishdevar/librepods/utils/CasePopupPolicy.kt
-          python3 source/LibrePods-M51-v4/tools/verify-m51-source.py
-      - name: Corrigir bateria desconhecida (sem modificar protocolo AACP)
-        run: python3 scripts/fix-m51-unknown-battery.py source/LibrePods-M51-v4
-      - name: Adicionar visualizacao manual BLE sem root
-        run: python3 scripts/m51-v5-public-ble-preview.py source/LibrePods-M51-v4
-      - name: Manter bateria BLE experimental atualizada no M51
-        run: python3 scripts/m51-v6-ble-continuo.py source/LibrePods-M51-v4
-      - name: Apply reviewed v7 source changes
-        run: git apply --directory=source/LibrePods-M51-v4 scripts/m51-v7.patch
-      - name: Apply M51 v8 lifecycle and Bluetooth retry fixes
-        run: python3 scripts/m51-v8-lifecycle-ble.py source/LibrePods-M51-v4
+          bash -n scripts/materialize-m51-v8.sh
+          bash scripts/materialize-m51-v8.sh
       - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
