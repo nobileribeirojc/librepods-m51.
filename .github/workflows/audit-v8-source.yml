@@ -1,4 +1,4 @@
-name: Audit M51 v8 Source (NO APK)
+name: Audit M51 v9 Bluetooth + battery source (NO APK)
 on:
   push:
     branches: [m51-root-cause-audit]
@@ -22,6 +22,8 @@ jobs:
           python3 scripts/m51-v6-ble-continuo.py source/LibrePods-M51-v4
           git apply --directory=source/LibrePods-M51-v4 scripts/m51-v7.patch
           python3 scripts/m51-v8-lifecycle-ble.py source/LibrePods-M51-v4
+      - name: Preserve v9 Bluetooth recovery patch
+        run: python3 scripts/m51-v9-ble-recovery.py source/LibrePods-M51-v4
       - name: Apply audited auto-battery and audio fixes (no version bump)
         run: python3 scripts/m51-p0-source-fixes.py source/LibrePods-M51-v4
       - name: Prevent automatic L2CAP spam on rootless Android 12
