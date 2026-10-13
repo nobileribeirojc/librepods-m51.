@@ -39,6 +39,21 @@ change("""    @SuppressLint("MissingPermission")
         m51FilterWatchdog = null
         val now = android.os.SystemClock.elapsedRealtime()""", "start lifecycle")
 
+change("""        if (lastScanStartMs?.let { now - it < 6_000L } == true) {
+            RootlessDiagnostics.scanStatus = "Aguarde 6 s entre reinícios para evitar bloqueio do Android"
+            return
+        }""",
+"""        val waitMs = m51ScanPolicy.remainingCooldownMs(lastScanStartMs, now)
+        if (waitMs > 0L) {
+            RootlessDiagnostics.scanStatus = "Novo scan aguardando janela segura (${waitMs / 1000 + 1}s)"
+            m51RetryTask = Runnable {
+                m51RetryTask = null
+                if (!m51StoppedByUser) startScanning(unfiltered = unfiltered)
+            }.also { cleanupHandler.postDelayed(it, waitMs + 100L) }
+            return
+        }""",
+"schedule cooldown retry instead of discarding scan requests")
+
 change("""        cleanupHandler.removeCallbacks(cleanupRunnable)
         try {
             Log.d(TAG, "Starting BLE scanner")""",
@@ -158,6 +173,11 @@ internal class M51ScanRecoveryPolicy {
     @Synchronized fun appleSeen() {
         consecutiveFailures = 0
     }
+
+    fun remainingCooldownMs(lastStartedMs: Long?, nowMs: Long): Long {
+        if (lastStartedMs == null || nowMs < lastStartedMs) return 0L
+        return (6_000L - (nowMs - lastStartedMs)).coerceAtLeast(0L)
+    }
 }
 '''
 test='''package me.kavishdevar.librepods.utils
@@ -176,6 +196,13 @@ class M51ScanRecoveryPolicyTest {
         val policy = M51ScanRecoveryPolicy()
         repeat(12) { policy.failed(2) }
         assertEquals(M51ScanRecoveryPolicy.Retry(30_000, true), policy.failed(2))
+    }
+
+    @Test fun cooldownRequestsAreDelayedNotSilentlyDropped() {
+        val policy = M51ScanRecoveryPolicy()
+        assertEquals(5_500L, policy.remainingCooldownMs(1_000L, 1_500L))
+        assertEquals(0L, policy.remainingCooldownMs(1_000L, 7_000L))
+        assertEquals(0L, policy.remainingCooldownMs(null, 500L))
     }
 
     @Test fun validAppleFrameResetsHardwareFallbackCounter() {
