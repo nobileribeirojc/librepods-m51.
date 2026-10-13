@@ -80,7 +80,7 @@ change("""            scanner.startScan(if (unfiltered) emptyList() else listOf(
             // Record the cooldown only after the Android scanner accepted startScan.
             lastScanStartMs = android.os.SystemClock.elapsedRealtime()
             RootlessDiagnostics.scanStatus = if (unfiltered) "BLE sem filtro (teste com tela acesa)" else "BLE com filtro Apple ativo" """.rstrip(),
-"""            val appleCountBefore = RootlessDiagnostics.apple.get()
+"""            val proximityCountBefore = RootlessDiagnostics.proximity.get()
             scanner.startScan(if (unfiltered) emptyList() else listOf(scanFilter), scanSettings, mScanCallback)
             // Record the cooldown only after the Android scanner accepted startScan.
             lastScanStartMs = android.os.SystemClock.elapsedRealtime()
@@ -93,7 +93,7 @@ change("""            scanner.startScan(if (unfiltered) emptyList() else listOf(
                 m51FilterWatchdog = Runnable {
                     m51FilterWatchdog = null
                     if (mScanCallback === currentCallback &&
-                        RootlessDiagnostics.apple.get() == appleCountBefore && !m51StoppedByUser) {
+                        RootlessDiagnostics.proximity.get() == proximityCountBefore && !m51StoppedByUser) {
                         RootlessDiagnostics.scanStatus = "Filtro Apple sem respostas; tentando BLE sem filtro"
                         startScanning(unfiltered = true)
                     }
@@ -103,7 +103,6 @@ change("""            scanner.startScan(if (unfiltered) emptyList() else listOf(
 change("""            RootlessDiagnostics.apple.incrementAndGet()
             val manufacturerData = PublicProximity.frame(appleData)""",
 """            RootlessDiagnostics.apple.incrementAndGet()
-            m51ScanPolicy.appleSeen()
             val manufacturerData = PublicProximity.frame(appleData)""", "recover policy on real Apple packets")
 
 change("""    @SuppressLint("MissingPermission")
@@ -121,6 +120,14 @@ change("""    @SuppressLint("MissingPermission")
         lastScanStartMs = null
         try {
             if (mBluetoothLeScanner""", "cancel background retries on service stop")
+
+
+change("""            RootlessDiagnostics.proximity.incrementAndGet()
+            val publicStatus = parseProximityMessage(address, manufacturerData)""",
+"""            RootlessDiagnostics.proximity.incrementAndGet()
+            m51ScanPolicy.appleSeen()
+            val publicStatus = parseProximityMessage(address, manufacturerData)""",
+"consider only valid Proximity BLE frames as scanner recovery")
 
 # Write all source only after anchors validated.
 policyfile=main/"M51ScanRecoveryPolicy.kt"
