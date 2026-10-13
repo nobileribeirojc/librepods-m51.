@@ -1,0 +1,1116 @@
+--- a/android/app/build.gradle.kts
++++ b/android/app/build.gradle.kts
+@@ -13,8 +13,8 @@
+         applicationId = "me.kavishdevar.librepods.m51test"
+         minSdk = 31
+         targetSdk = 35
+-        versionCode = 10
+-        versionName = "0.1.0-rc.4-m51-exp4-popup"
++        versionCode = 17
++        versionName = "0.1.0-rc.4-m51-v7"
+     }
+ 
+     buildTypes {
+@@ -41,6 +41,7 @@
+ }
+ 
+ dependencies {
++    testImplementation("junit:junit:4.13.2")
+     implementation(libs.accompanist.permissions)
+     implementation(libs.hiddenapibypass)
+     implementation(libs.androidx.core.ktx)
+--- a/android/app/src/main/java/me/kavishdevar/librepods/composables/BatteryView.kt
++++ b/android/app/src/main/java/me/kavishdevar/librepods/composables/BatteryView.kt
+@@ -1,188 +1,59 @@
+-/*
+- * LibrePods - AirPods liberated from Apple’s ecosystem
+- *
+- * Copyright (C) 2025 LibrePods contributors
+- *
+- * This program is free software: you can redistribute it and/or modify
+- * it under the terms of the GNU Affero General Public License as published
+- * by the Free Software Foundation, either version 3 of the License.
+- *
+- * This program is distributed in the hope that it will be useful,
+- * but WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+- * GNU Affero General Public License for more details.
+- *
+- * You should have received a copy of the GNU Affero General Public License
+- * along with this program. If not, see <https://www.gnu.org/licenses/>.
+- */
+-
+-@file:OptIn(ExperimentalEncodingApi::class)
+-
++/* LibrePods — AGPL-3.0-or-later; three independent battery readings on API 31+. */
+ package me.kavishdevar.librepods.composables
+ 
+-import android.content.BroadcastReceiver
+-import android.content.Context
+-import android.content.Intent
+-import android.content.IntentFilter
++import android.content.*
+ import android.os.Build
+-import android.util.Log
+ import androidx.compose.foundation.Image
+-import androidx.compose.foundation.layout.Arrangement
+-import androidx.compose.foundation.layout.Column
+-import androidx.compose.foundation.layout.Row
+-import androidx.compose.foundation.layout.Spacer
+-import androidx.compose.foundation.layout.fillMaxWidth
+-import androidx.compose.foundation.layout.width
+-import androidx.compose.runtime.Composable
+-import androidx.compose.runtime.LaunchedEffect
+-import androidx.compose.runtime.mutableStateOf
+-import androidx.compose.runtime.remember
++import androidx.compose.foundation.layout.*
++import androidx.compose.material3.Text
++import androidx.compose.runtime.*
+ import androidx.compose.ui.Alignment
+ import androidx.compose.ui.Modifier
+-import androidx.compose.ui.draw.scale
+ import androidx.compose.ui.graphics.ImageBitmap
+-import androidx.compose.ui.platform.LocalContext
+ import androidx.compose.ui.res.imageResource
+-import androidx.compose.ui.res.stringResource
+-import androidx.compose.ui.tooling.preview.Preview
+ import androidx.compose.ui.unit.dp
+ import me.kavishdevar.librepods.R
+ import me.kavishdevar.librepods.services.AirPodsService
+-import me.kavishdevar.librepods.utils.AirPodsNotifications
+-import me.kavishdevar.librepods.utils.Battery
+-import me.kavishdevar.librepods.utils.BatteryComponent
+-import me.kavishdevar.librepods.utils.BatteryStatus
++import me.kavishdevar.librepods.utils.*
+ import kotlin.io.encoding.ExperimentalEncodingApi
+ 
++@OptIn(ExperimentalEncodingApi::class)
+ @Composable
+ fun BatteryView(service: AirPodsService, preview: Boolean = false) {
+-    val batteryStatus = remember { mutableStateOf<List<Battery>>(listOf()) }
+-    @Suppress("DEPRECATION") val batteryReceiver = remember {
+-        object : BroadcastReceiver() {
+-            override fun onReceive(context: Context, intent: Intent) {
+-                if (intent.action == AirPodsNotifications.BATTERY_DATA) {
+-                    batteryStatus.value =
+-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+-                            intent.getParcelableArrayListExtra("data", Battery::class.java)
+-                        } else {
+-                            intent.getParcelableArrayListExtra("data")
+-                        }?.toList() ?: listOf()
+-                }
+-                else if (intent.action == AirPodsNotifications.DISCONNECT_RECEIVERS) {
+-                    try {
+-                        context.unregisterReceiver(this)
+-                    }
+-                    catch (_: IllegalArgumentException) {
+-                        Log.wtf("BatteryReceiver", "Receiver already unregistered")
+-                    }
++    val context = androidx.compose.ui.platform.LocalContext.current
++    var values by remember(service) { mutableStateOf(service.getBattery()) }
++    DisposableEffect(context, service) {
++        val receiver = object : BroadcastReceiver() {
++            override fun onReceive(context: Context?, intent: Intent?) {
++                if (intent?.action == AirPodsNotifications.BATTERY_DATA) values = service.getBattery()
++            }
++        }
++        val filter = IntentFilter(AirPodsNotifications.BATTERY_DATA)
++        if (Build.VERSION.SDK_INT >= 33) context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
++        else context.registerReceiver(receiver, filter)
++        values = service.getBattery()
++        onDispose { context.unregisterReceiver(receiver) }
++    }
++    val displayed = if (preview) listOf(
++        Battery(BatteryComponent.LEFT, 90, BatteryStatus.NOT_CHARGING),
++        Battery(BatteryComponent.RIGHT, 80, BatteryStatus.CHARGING),
++        Battery(BatteryComponent.CASE, 10, BatteryStatus.NOT_CHARGING)
++    ) else values
++    Column(horizontalAlignment = Alignment.CenterHorizontally) {
++        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
++            listOf(BatteryComponent.LEFT to "Esquerdo", BatteryComponent.RIGHT to "Direito",
++                BatteryComponent.CASE to "Estojo").forEach { (component, label) ->
++                val battery = displayed.find { it.component == component }
++                Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
++                    Image(ImageBitmap.imageResource(if (component == BatteryComponent.CASE)
++                        R.drawable.pro_2_case else R.drawable.pro_2_buds), label, Modifier.size(76.dp))
++                    Text(label)
++                    BatteryIndicator(battery?.takeIf { it.status != BatteryStatus.DISCONNECTED }?.level ?: -1,
++                        battery?.status == BatteryStatus.CHARGING)
+                 }
+             }
+         }
+-    }
+-    val context = LocalContext.current
+-
+-    LaunchedEffect(context) {
+-        val batteryIntentFilter = IntentFilter()
+-            .apply {
+-                addAction(AirPodsNotifications.BATTERY_DATA)
+-                addAction(AirPodsNotifications.DISCONNECT_RECEIVERS)
+-            }
+-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+-            context.registerReceiver(
+-                batteryReceiver,
+-                batteryIntentFilter,
+-                Context.RECEIVER_EXPORTED
+-            )
+-        }
+-    }
+-
+-    batteryStatus.value = service.getBattery()
+-
+-    if (preview) {
+-        batteryStatus.value = listOf<Battery>(
+-            Battery(BatteryComponent.LEFT, 100, BatteryStatus.CHARGING),
+-            Battery(BatteryComponent.RIGHT, 50, BatteryStatus.NOT_CHARGING),
+-            Battery(BatteryComponent.CASE, 5, BatteryStatus.CHARGING)
+-        )
+-    }
+-
+-    Row {
+-        Column (
+-            modifier = Modifier
+-                .fillMaxWidth(0.5f),
+-            horizontalAlignment = Alignment.CenterHorizontally
+-        ) {
+-            Image (
+-                bitmap = ImageBitmap.imageResource(R.drawable.pro_2_buds),
+-                contentDescription = stringResource(R.string.buds),
+-                modifier = Modifier
+-                    .fillMaxWidth()
+-                    .scale(0.80f)
+-            )
+-            val left = batteryStatus.value.find { it.component == BatteryComponent.LEFT }
+-            val right = batteryStatus.value.find { it.component == BatteryComponent.RIGHT }
+-            if ((right?.status == BatteryStatus.CHARGING && left?.status == BatteryStatus.CHARGING) || (left?.status == BatteryStatus.NOT_CHARGING && right?.status == BatteryStatus.NOT_CHARGING))
+-            {
+-                BatteryIndicator(right.level.let { left.level.coerceAtMost(it) }, left.status == BatteryStatus.CHARGING)
+-            }
+-            else {
+-                Row (
+-                    modifier = Modifier
+-                        .fillMaxWidth(),
+-                    horizontalArrangement = Arrangement.Center
+-                ) {
+-//                    if (left?.status != BatteryStatus.DISCONNECTED) {
+-                    if (left?.level != null) {
+-                        BatteryIndicator(
+-                            left.level.takeIf { left.status != BatteryStatus.DISCONNECTED } ?: -1,
+-                            left.status == BatteryStatus.CHARGING
+-                        )
+-                    }
+-//                    }
+-//                    if (left?.status != BatteryStatus.DISCONNECTED && right?.status != BatteryStatus.DISCONNECTED) {
+-                    if (left?.level != null && right?.level != null)
+-                    {
+-                        Spacer(modifier = Modifier.width(16.dp))
+-                    }
+-//                    }
+-//                    if (right?.status != BatteryStatus.DISCONNECTED) {
+-                    if (right?.level != null)
+-                    {
+-                        BatteryIndicator(
+-                            right.level.takeIf { right.status != BatteryStatus.DISCONNECTED } ?: -1,
+-                            right.status == BatteryStatus.CHARGING
+-                        )
+-                    }
+-//                    }
+-                }
+-            }
+-        }
+-
+-        Column (
+-            modifier = Modifier
+-                .fillMaxWidth(),
+-            horizontalAlignment = Alignment.CenterHorizontally
+-        ) {
+-            val case = batteryStatus.value.find { it.component == BatteryComponent.CASE }
+-
+-            Image(
+-                bitmap = ImageBitmap.imageResource(R.drawable.pro_2_case),
+-                contentDescription = stringResource(R.string.case_alt),
+-                modifier = Modifier
+-                    .fillMaxWidth()
+-                    .scale(1.25f)
+-            )
+-//            if (case?.status != BatteryStatus.DISCONNECTED) {
+-                if (case?.level != null) {
+-                    BatteryIndicator(case.level.takeIf { case.status != BatteryStatus.DISCONNECTED } ?: -1, case.status == BatteryStatus.CHARGING)
+-                }
+-//            }
+-        }
++        Text(if (service.isConnectedLocally) "Bateria recebida pelo LibrePods"
++            else "≈ BLE · passos de 10% · estojo pode manter leitura por até 30 s")
+     }
+ }
+-
+-@Preview
+-@Composable
+-fun BatteryViewPreview() {
+-    BatteryView(AirPodsService(), preview = true)
+-}
+--- /dev/null
++++ b/android/app/src/main/java/me/kavishdevar/librepods/composables/M51ConnectionStatus.kt
+@@ -0,0 +1,63 @@
++/* LibrePods M51 — AGPL-3.0-or-later. Audio profile is independent of AACP. */
++package me.kavishdevar.librepods.composables
++
++import android.annotation.SuppressLint
++import android.bluetooth.*
++import android.content.*
++import android.os.Build
++import androidx.compose.material3.Text
++import androidx.compose.runtime.*
++import androidx.compose.ui.platform.LocalContext
++
++@SuppressLint("MissingPermission")
++@Composable
++fun M51ConnectionStatus() {
++    val context = LocalContext.current
++    var audio by remember { mutableStateOf("Consultando conexão de áudio…") }
++    DisposableEffect(context) {
++        val adapter = context.getSystemService(BluetoothManager::class.java)?.adapter
++        val proxies = mutableMapOf<Int, BluetoothProfile>()
++        var disposed = false
++        fun refresh() {
++            try {
++                val saved = context.getSharedPreferences("settings", Context.MODE_PRIVATE).getString("mac_address", null)
++                val connected = proxies.values.flatMap { it.connectedDevices }.any {
++                    if (saved != null) it.address == saved else it.name?.contains("AirPods", true) == true
++                }
++                audio = if (connected) "Áudio Bluetooth conectado" else "Áudio dos AirPods não detectado nos perfis Bluetooth"
++            } catch (_: SecurityException) { audio = "Autorize Dispositivos próximos para verificar o áudio" }
++        }
++        val listener = object : BluetoothProfile.ServiceListener {
++            override fun onServiceConnected(profile: Int, proxy: BluetoothProfile) {
++                if (disposed) { adapter?.closeProfileProxy(profile, proxy); return }
++                proxies[profile] = proxy
++                refresh()
++            }
++            override fun onServiceDisconnected(profile: Int) { proxies.remove(profile); if (!disposed) refresh() }
++        }
++        val receiver = object : BroadcastReceiver() {
++            override fun onReceive(context: Context?, intent: Intent?) { refresh() }
++        }
++        val filter = IntentFilter().apply {
++            addAction(BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED)
++            addAction(BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED)
++            addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
++        }
++        if (Build.VERSION.SDK_INT >= 33) context.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
++        else context.registerReceiver(receiver, filter)
++        try {
++            if (adapter == null || !adapter.isEnabled) audio = "Bluetooth desligado ou indisponível"
++            else {
++                adapter.getProfileProxy(context, listener, BluetoothProfile.A2DP)
++                adapter.getProfileProxy(context, listener, BluetoothProfile.HEADSET)
++            }
++        } catch (_: SecurityException) { audio = "Autorize Dispositivos próximos para verificar o áudio" }
++        onDispose {
++            disposed = true
++            context.unregisterReceiver(receiver)
++            proxies.forEach { (profile, proxy) -> adapter?.closeProfileProxy(profile, proxy) }
++            proxies.clear()
++        }
++    }
++    Text(audio)
++}
+--- a/android/app/src/main/java/me/kavishdevar/librepods/screens/AirPodsSettingsScreen.kt
++++ b/android/app/src/main/java/me/kavishdevar/librepods/screens/AirPodsSettingsScreen.kt
+@@ -123,7 +123,10 @@
+     }
+ 
+     LaunchedEffect(service) {
+-        isLocallyConnected = service.isConnectedLocally
++        while (true) {
++            isLocallyConnected = service.isConnectedLocally && service.aacpReady
++            kotlinx.coroutines.delay(500)
++        }
+     }
+ 
+     val nameChangeListener = remember {
+@@ -174,7 +177,7 @@
+                     }
+                     AirPodsNotifications.AIRPODS_CONNECTED -> {
+                         coroutineScope.launch {
+-                            isLocallyConnected = true
++                            isLocallyConnected = service.aacpReady
+                         }
+                     }
+                     AirPodsNotifications.AIRPODS_DISCONNECTED -> {
+@@ -325,6 +328,7 @@
+ 
+                 Spacer(modifier = Modifier.height(64.dp))
+ 
++                me.kavishdevar.librepods.composables.M51ConnectionStatus()
+                 BatteryView(service = service)
+                 // The public BLE estimate is deliberately separate from authenticated AACP data.
+                 Button(onClick = { navController.navigate("m51_diagnostics") }) {
+@@ -402,7 +406,7 @@
+                 verticalArrangement = Arrangement.Center
+             ) {
+                 Text(
+-                    text = "AirPods not connected",
++                    text = "Controle AACP indisponível",
+                     style = TextStyle(
+                         fontSize = 24.sp,
+                         fontWeight = FontWeight.Medium,
+@@ -413,8 +417,10 @@
+                     modifier = Modifier.fillMaxWidth()
+                 )
+                 Spacer(Modifier.height(24.dp))
++                me.kavishdevar.librepods.composables.M51ConnectionStatus()
++                BatteryView(service = service)
+                 Text(
+-                    text = "Please connect your AirPods to access settings.",
++                    text = "Áudio e bateria BLE funcionam por canais separados. Controles de ruído ficam indisponíveis até receber uma resposta AACP.",
+                     style = TextStyle(
+                         fontSize = 16.sp,
+                         fontWeight = FontWeight.Light,
+--- a/android/app/src/main/java/me/kavishdevar/librepods/screens/Onboarding.kt
++++ b/android/app/src/main/java/me/kavishdevar/librepods/screens/Onboarding.kt
+@@ -29,6 +29,9 @@
+ @Composable
+ fun Onboarding(navController: NavController, activityContext: Context) {
+  var revision by remember { mutableIntStateOf(0) }
++ var insecureClassic by remember { mutableStateOf(false) }
++ val preferences = remember { activityContext.getSharedPreferences("settings", Context.MODE_PRIVATE) }
++ var automaticPopup by remember { mutableStateOf(preferences.getBoolean("m51_nearby_popup_opt_in", false)) }
+  var selectedDevice by remember { mutableStateOf<BluetoothDevice?>(null) }
+  val hasConnectPermission = ContextCompat.checkSelfPermission(
+      activityContext, Manifest.permission.BLUETOOTH_CONNECT
+@@ -47,12 +50,23 @@
+  LaunchedEffect(Unit) { while (true) { delay(1000); revision++ } }
+  val report = remember(revision) { RootlessDiagnostics.report() }
+  Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+-  Text("LibrePods · Diagnóstico M51", style = MaterialTheme.typography.headlineMedium)
++  Text("LibrePods M51 · v7", style = MaterialTheme.typography.headlineMedium)
+   Text("Adaptação experimental do LibrePods 0.1.0-rc.4. A conexão de controle no Android 12 pode falhar por uma limitação do sistema. Nenhuma correção de sistema foi aplicada.")
+   Text("1. Ative Bluetooth e Localização e pareie os AirPods.\n2. Abra o estojo perto do celular.\n3. Confira o diagnóstico e selecione o dispositivo anunciado.")
+   Button(onClick = { activityContext.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) }) { Text("Abrir Bluetooth") }
+   Button(onClick = { activityContext.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)) }) { Text("Abrir Localização") }
++  Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
++      Switch(checked = automaticPopup, onCheckedChange = {
++          automaticPopup = it
++          preferences.edit().putBoolean("m51_nearby_popup_opt_in", it).apply()
++      })
++      Text("Janela automática: AirPods Pro 3 próximos (BLE não autenticado)")
++  }
+   Text("Teste de conexão AACP clássico (sem root)", style = MaterialTheme.typography.titleMedium)
++  Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
++      Checkbox(checked = insecureClassic, onCheckedChange = { insecureClassic = it })
++      Text("Alternativa experimental CAPod: socket clássico sem autenticação exigida. Não corrige a pilha do Android.")
++  }
+   Text("Este teste usa o serviço original do LibrePods, não um protocolo substituto. " +
+        "É necessário conectar os AirPods pelo Bluetooth do Android antes de tentar. " +
+        "O resultado não altera o sistema ou instala módulos de root.")
+@@ -78,7 +92,7 @@
+               } else {
+                   RootlessDiagnostics.stage("Teste solicitado; verificando L2CAP em segundo plano")
+                   CoroutineScope(Dispatchers.IO).launch {
+-                      try { service.connectToSocket(target) }
++                      try { service.connectToSocket(target, useInsecureClassic = insecureClassic) }
+                       catch (e: Exception) { RootlessDiagnostics.fail("Teste manual", e) }
+                   }
+               }
+@@ -89,6 +103,9 @@
+       ServiceManager.getService()?.bleManager?.startScanning()
+       revision++
+   }) { Text("Reiniciar busca BLE (abra o estojo)") }
++  OutlinedButton(onClick = {
++      ServiceManager.getService()?.bleManager?.startScanning(unfiltered = true)
++  }) { Text("Teste BLE sem filtro (tela acesa; aguarde 6 s)") }
+   Text("Se o teste falhar, compartilhe o relatório abaixo. Não mostra endereço Bluetooth, " +
+        "chaves nem conteúdo dos pacotes.")
+   Text(report)
+--- a/android/app/src/main/java/me/kavishdevar/librepods/services/AirPodsService.kt
++++ b/android/app/src/main/java/me/kavishdevar/librepods/services/AirPodsService.kt
+@@ -198,6 +198,7 @@
+     @Volatile private var manualBleExpiryMs: Long = 0L
+     private val manualBleHandler = Handler(Looper.getMainLooper())
+     private var manualBleResetTask: Runnable? = null
++    private var lastManualBleUiMs = 0L
+ 
+     /** One selected public BLE candidate, for sixty seconds only; no pairing claim. */
+     fun displaySelectedBleBattery(): Boolean {
+@@ -232,8 +233,12 @@
+                     manualBleHandler.removeCallbacks(task)
+                     manualBleHandler.postDelayed(task, 60_000L)
+                 }
+-                batteryNotification.setBatteryFromBle(status)
+-                updateBattery()
++                val now = android.os.SystemClock.elapsedRealtime()
++                if (now - lastManualBleUiMs >= 1000L) {
++                    lastManualBleUiMs = now
++                    batteryNotification.setBatteryFromBle(status)
++                    updateBattery()
++                }
+             }
+         }
+     }
+@@ -331,7 +336,7 @@
+             receiveManuallySelectedBleBattery(device)
+             // All other public BLE broadcasts are NOT linked to a paired device.
+             if (!sharedPreferences.getBoolean("m51_nearby_popup_opt_in", false)) return
+-            if (device.model != "AirPods Pro 3" || !device.lidOpen || rssiDbm < -64) return
++            if (device.model != "AirPods Pro 3") return
+             if (popupWindowM51?.isShowing == true) {
+                 if (popupAddressM51 == device.address) popupWindowM51?.updateBle(device, true)
+                 return
+@@ -342,7 +347,8 @@
+                     device.model, device.lidOpen, rssiDbm,
+                     explicitlyEnabled = true,
+                     hasBondedAirPods = hasBondedAirPodsForNearbyPopup(),
+-                    nowMs = now
++                    nowMs = now,
++                    address = device.address
+                 )) return
+             val opened = showPopup(
+                 this@AirPodsService,
+@@ -736,6 +742,7 @@
+         startActivity(intent)
+     }
+ 
++    @Volatile var aacpReady = false
+     var isConnectedLocally = false
+     var device: BluetoothDevice? = null
+ 
+@@ -922,9 +929,9 @@
+ 
+             it.setTextViewText(
+                 R.id.left_battery_widget,
+-                leftBattery?.let {
++                leftBattery?.takeIf { it.status != BatteryStatus.DISCONNECTED }?.let {
+                     "${it.level}%"
+-                } ?: ""
++                } ?: "—"
+             )
+             it.setProgressBar(
+                 R.id.left_battery_progress,
+@@ -939,9 +946,9 @@
+ 
+             it.setTextViewText(
+                 R.id.right_battery_widget,
+-                rightBattery?.let {
++                rightBattery?.takeIf { it.status != BatteryStatus.DISCONNECTED }?.let {
+                     "${it.level}%"
+-                } ?: ""
++                } ?: "—"
+             )
+             it.setProgressBar(
+                 R.id.right_battery_progress,
+@@ -956,9 +963,9 @@
+ 
+             it.setTextViewText(
+                 R.id.case_battery_widget,
+-                caseBattery?.let {
++                caseBattery?.takeIf { it.status != BatteryStatus.DISCONNECTED }?.let {
+                     "${it.level}%"
+-                } ?: ""
++                } ?: "—"
+             )
+             it.setProgressBar(
+                 R.id.case_battery_progress,
+@@ -1003,7 +1010,7 @@
+     @SuppressLint("MissingPermission")
+     @OptIn(ExperimentalMaterial3Api::class)
+     fun updateBattery() {
+-        setBatteryMetadata()
++        if (isConnectedLocally && aacpReady) setBatteryMetadata()
+         updateBatteryWidget()
+         sendBatteryBroadcast()
+         sendBatteryNotification()
+@@ -1852,7 +1859,14 @@
+         CrossDevice.isAvailable = false
+     }
+ 
+-    private fun createBluetoothSocket(device: BluetoothDevice, uuid: ParcelUuid): BluetoothSocket {
++    private fun createBluetoothSocket(device: BluetoothDevice, uuid: ParcelUuid, useInsecureClassic: Boolean): BluetoothSocket {
++        if (useInsecureClassic) {
++            HiddenApiBypass.addHiddenApiExemptions("Landroid/bluetooth/BluetoothDevice;")
++            RootlessDiagnostics.stage("Teste CAPod: createInsecureL2capSocket, BR/EDR PSM 4097")
++            // NOT createInsecureL2capChannel (that is LE CoC, a different transport).
++            return HiddenApiBypass.invoke(BluetoothDevice::class.java, device,
++                "createInsecureL2capSocket", 0x1001) as BluetoothSocket
++        }
+         val type = 3 // L2CAP
+         val constructorSpecs = listOf(
+             arrayOf(device, type, true, true, 0x1001, uuid),
+@@ -1894,7 +1908,7 @@
+ 
+     @RequiresApi(Build.VERSION_CODES.R)
+     @SuppressLint("MissingPermission", "UnspecifiedRegisterReceiverFlag")
+-    fun connectToSocket(device: BluetoothDevice) {
++    fun connectToSocket(device: BluetoothDevice, useInsecureClassic: Boolean = false) {
+         if (!l2capAttemptRunning.compareAndSet(false, true)) {
+             // Do not spawn simultaneous classic L2CAP sockets for the same AirPods.
+             return
+@@ -1909,6 +1923,7 @@
+             return
+         }
+         RootlessDiagnostics.beginConnection()
++        aacpReady = false
+         Log.d("AirPodsService", "<LogCollector:Start> Connecting to socket")
+         try {
+             HiddenApiBypass.addHiddenApiExemptions("Landroid/bluetooth/BluetoothSocket;")
+@@ -1920,7 +1935,7 @@
+         val uuid: ParcelUuid = ParcelUuid.fromString("74ec2172-0bad-4d01-8f77-997b2be0722a")
+         if (isConnectedLocally != true && !CrossDevice.isAvailable) {
+             socket = try {
+-                createBluetoothSocket(device, uuid)
++                createBluetoothSocket(device, uuid, useInsecureClassic)
+             } catch (e: Exception) {
+                 RootlessDiagnostics.fail("Criação do socket", e)
+                 Log.e("AirPodsService", "Failed to create BluetoothSocket: ${e.message}")
+@@ -1930,14 +1945,16 @@
+ 
+             try {
+                 runBlocking {
+-                    withTimeout(5000L) {
++                    withTimeout(15_000L) {
+                         try {
+-                            RootlessDiagnostics.stage("Socket criado; negociação L2CAP clássica (PSM 4097)")
++                            RootlessDiagnostics.stage(if (useInsecureClassic)
++                                "Negociação BR/EDR sem autenticação exigida, PSM 4097"
++                                else "Negociação BR/EDR original, PSM 4097")
+                             val connectingSocket = socket
+                             val watchdog = java.util.Timer("m51-connect-timeout", true)
+                             watchdog.schedule(object : java.util.TimerTask() {
+                                 override fun run() { if (!connectingSocket.isConnected) try { connectingSocket.close() } catch (_: Exception) {} }
+-                            }, 4000L)
++                            }, 12_000L)
+                             try { connectingSocket.connect() } finally { watchdog.cancel() }
+                             RootlessDiagnostics.connected()
+ 
+@@ -1965,13 +1982,14 @@
+                     }
+                 }
+                 this@AirPodsService.device = device
+-                socket.let { it ->
++                socket.let { sessionSocket ->
+                     aacpManager.sendPacket(aacpManager.createHandshakePacket())
+                     aacpManager.sendSetFeatureFlagsPacket()
+                     aacpManager.sendNotificationRequest()
+                     Log.d("AirPodsService", "Requesting proximity keys")
+                     aacpManager.sendRequestProximityKeys((AACPManager.Companion.ProximityKeyType.IRK.value + AACPManager.Companion.ProximityKeyType.ENC_KEY.value).toByte())
+                     CoroutineScope(Dispatchers.IO).launch {
++                      try {
+                         aacpManager.sendPacket(aacpManager.createHandshakePacket())
+                         delay(200)
+                         aacpManager.sendSetFeatureFlagsPacket()
+@@ -1988,13 +2006,8 @@
+                             if (!handleIncomingCallOnceConnected) stopHeadTracking()
+                         }, 5000)
+ 
+-                        sendBroadcast(
+-                            Intent(AirPodsNotifications.AIRPODS_CONNECTED)
+-                                .putExtra("device", device)
+-                        )
+-
+-                        while (socket.isConnected == true) {
+-                            socket.let {
++                        while (sessionSocket.isConnected) {
++                            sessionSocket.let {
+                                 val buffer = ByteArray(1024)
+                                 val bytesRead = it.inputStream.read(buffer)
+                                 var data: ByteArray = byteArrayOf()
+@@ -2002,6 +2015,13 @@
+                                     RootlessDiagnostics.controlPackets.incrementAndGet()
+                                     RootlessDiagnostics.stage("Pacotes AACP recebidos: comunicação bidirecional")
+                                     data = buffer.copyOfRange(0, bytesRead)
++                                    if (!aacpReady && data.size >= 6 &&
++                                        data[0] == 4.toByte() && data[1] == 0.toByte() &&
++                                        data[2] == 4.toByte() && data[3] == 0.toByte()) {
++                                        aacpReady = true
++                                        sendBroadcast(Intent(AirPodsNotifications.AIRPODS_CONNECTED)
++                                            .putExtra("device", device))
++                                    }
+                                     sendBroadcast(Intent(AirPodsNotifications.AIRPODS_DATA).apply {
+                                         putExtra("data", buffer.copyOfRange(0, bytesRead))
+                                     })
+@@ -2028,17 +2048,25 @@
+                                 }
+                             }
+                         }
+-                        Log.d("AirPods Service", "Socket closed")
++                      } catch (e: Exception) {
++                        RootlessDiagnostics.fail("Leitura AACP", e)
++                      } finally {
++                        aacpReady = false
+                         isConnectedLocally = false
+-                        socket.close()
++                        try { sessionSocket.close() } catch (_: Exception) {}
++                        batteryNotification.clearPublicBleBattery()
+                         sendBroadcast(Intent(AirPodsNotifications.AIRPODS_DISCONNECTED))
++                        manualBleHandler.post { updateBattery() }
++                      }
+                     }
+                 }
+             } catch (e: Exception) {
+                 RootlessDiagnostics.fail("Estabelecimento L2CAP / inicialização AACP", e)
+                 Log.e("AirPodsService", "Failed to connect to socket", e)
+                 showSocketConnectionFailureNotification("Failed to establish connection: ${e.message}")
++                aacpReady = false
+                 isConnectedLocally = false
++                try { socket.close() } catch (_: Exception) {}
+                 this@AirPodsService.device = device
+                 updateNotificationContent(false)
+             }
+--- a/android/app/src/main/java/me/kavishdevar/librepods/utils/AACPManager.kt
++++ b/android/app/src/main/java/me/kavishdevar/librepods/utils/AACPManager.kt
+@@ -452,7 +452,12 @@
+         try {
+             Log.d(TAG, "Sending packet: ${packet.joinToString(" ") { "%02X".format(it) }}")
+ 
+-            if (packet[4] == Opcodes.CONTROL_COMMAND) {
++
++            val socket = BluetoothConnectionManager.getCurrentSocket()
++            if (socket?.isConnected == true) {
++                socket.outputStream?.write(packet)
++                socket.outputStream?.flush()
++            if (packet.size > 4 && packet[4] == Opcodes.CONTROL_COMMAND) {
+                 val controlCommand = ControlCommand.fromByteArray(packet)
+                 Log.d(TAG, "Control command: ${controlCommand.identifier.toHexString()} - ${controlCommand.value.joinToString(" ") { "%02X".format(it) }}")
+                 setControlCommandStatusValue(
+@@ -461,10 +466,6 @@
+                 )
+             }
+ 
+-            val socket = BluetoothConnectionManager.getCurrentSocket()
+-            if (socket?.isConnected == true) {
+-                socket.outputStream?.write(packet)
+-                socket.outputStream?.flush()
+                 return true
+             } else {
+                 Log.d(TAG, "Can't send packet: Socket not initialized or connected")
+--- a/android/app/src/main/java/me/kavishdevar/librepods/utils/BLEManager.kt
++++ b/android/app/src/main/java/me/kavishdevar/librepods/utils/BLEManager.kt
+@@ -74,6 +74,8 @@
+         fun onNearbyProximityAdvertisement(device: AirPodsStatus, rssiDbm: Int)
+     }
+ 
++    private val publicCaseCache = PublicCaseCache()
++    private var lastScanStartMs: Long? = null
+     private var mBluetoothLeScanner: BluetoothLeScanner? = null
+     private var mScanCallback: ScanCallback? = null
+     private var airPodsStatusListener: AirPodsStatusListener? = null
+@@ -126,7 +128,14 @@
+     }
+ 
+     @SuppressLint("MissingPermission")
+-    fun startScanning() {
++    fun startScanning(unfiltered: Boolean = false) {
++        val now = android.os.SystemClock.elapsedRealtime()
++        if (lastScanStartMs?.let { now - it < 6_000L } == true) {
++            RootlessDiagnostics.scanStatus = "Aguarde 6 s entre reinícios para evitar bloqueio do Android"
++            return
++        }
++        lastScanStartMs = now
++        cleanupHandler.removeCallbacks(cleanupRunnable)
+         try {
+             Log.d(TAG, "Starting BLE scanner")
+ 
+@@ -164,18 +173,9 @@
+                 .setReportDelay(0L)
+                 .build()
+ 
+-            val manufacturerData = ByteArray(27)
+-            val manufacturerDataMask = ByteArray(27)
+-
+-            manufacturerData[0] = 7
+-            manufacturerData[1] = 25
+-
+-            manufacturerDataMask[0] = -1
+-            manufacturerDataMask[1] = -1
+-
++            // A real filter keeps scanning eligible while the display is off. Parse TLVs in software.
+             val scanFilter = ScanFilter.Builder()
+-                .setManufacturerData(76, manufacturerData, manufacturerDataMask)
+-                .build()
++                .setManufacturerData(76, byteArrayOf()).build()
+ 
+             mScanCallback = object : ScanCallback() {
+                 override fun onScanResult(callbackType: Int, result: ScanResult) {
+@@ -197,8 +197,8 @@
+                 }
+             }
+ 
+-            mBluetoothLeScanner?.startScan(emptyList(), scanSettings, mScanCallback)
+-            RootlessDiagnostics.scanStatus = "Busca BLE iniciada (sem filtro de hardware)"
++            mBluetoothLeScanner?.startScan(if (unfiltered) emptyList() else listOf(scanFilter), scanSettings, mScanCallback)
++            RootlessDiagnostics.scanStatus = if (unfiltered) "BLE sem filtro (teste com tela acesa)" else "BLE com filtro Apple ativo"
+             Log.d(TAG, "BLE scanner started successfully")
+ 
+             cleanupHandler.postDelayed(cleanupRunnable, CLEANUP_INTERVAL_MS)
+@@ -269,9 +269,12 @@
+             val address = result.device.address
+ 
+ 
+-            val manufacturerData = scanRecord.getManufacturerSpecificData(76) ?: return
++            val appleData = scanRecord.getManufacturerSpecificData(76) ?: return
+             RootlessDiagnostics.apple.incrementAndGet()
+-            if (manufacturerData.size < 27 || manufacturerData[0].toInt() != 7 || manufacturerData[1].toInt() != 25) return
++            val manufacturerData = PublicProximity.frame(appleData) ?: run {
++                RootlessDiagnostics.rejected.incrementAndGet()
++                return
++            }
+             RootlessDiagnostics.proximity.incrementAndGet()
+             val publicStatus = parseProximityMessage(address, manufacturerData)
+             RootlessDiagnostics.observe(publicStatus)
+@@ -362,7 +365,7 @@
+ 
+         val primaryLeft = ((status shr 5) and 0x01) == 1
+         val thisInCase = ((status shr 6) and 0x01) == 1
+-        val xorFactor = primaryLeft xor thisInCase
++        val xorFactor = !primaryLeft xor thisInCase
+ 
+         val isLeftInEar = if (xorFactor) (status and 0x08) != 0 else (status and 0x02) != 0
+         val isRightInEar = if (xorFactor) (status and 0x02) != 0 else (status and 0x08) != 0
+@@ -387,7 +390,7 @@
+             rawCaseBattery
+         }
+ 
+-        val lidOpen = ((lid shr 3) and 0x01) == 0
++        val lidOpen = (thisInCase || status and 0x04 != 0) && ((lid shr 3) and 0x01) == 0
+ 
+         return AirPodsStatus(
+             address = address,
+@@ -446,61 +449,20 @@
+     }
+ 
+     private fun parseProximityMessage(address: String, data: ByteArray): AirPodsStatus {
+-        val paired = data[2].toInt() == 1
+-        val modelId = ((data[3].toInt() and 0xFF) shl 8) or (data[4].toInt() and 0xFF)
+-        val model = modelNames[modelId] ?: "Unknown ($modelId)"
+-
+-        val status = data[5].toInt() and 0xFF
+-        val podsBattery = data[6].toInt() and 0xFF
+-        val flagsCase = data[7].toInt() and 0xFF
+-        val lid = data[8].toInt() and 0xFF
+-        val color = colorNames[data[9].toInt()] ?: "Unknown"
+-        val conn = connStates[data[10].toInt()] ?: "Unknown (${data[10].toInt()})"
+-
+-        val primaryLeft = ((status shr 5) and 0x01) == 1
+-        val thisInCase = ((status shr 6) and 0x01) == 1
+-        val xorFactor = primaryLeft xor thisInCase
+-
+-        val isLeftInEar = if (xorFactor) (status and 0x08) != 0 else (status and 0x02) != 0
+-        val isRightInEar = if (xorFactor) (status and 0x02) != 0 else (status and 0x08) != 0
+-
+-        val isFlipped = !primaryLeft
+-        
+-        val leftBatteryNibble = if (isFlipped) (podsBattery shr 4) and 0x0F else podsBattery and 0x0F
+-        val rightBatteryNibble = if (isFlipped) podsBattery and 0x0F else (podsBattery shr 4) and 0x0F
+-        
+-        val caseBattery = flagsCase and 0x0F
+-        val flags = (flagsCase shr 4) and 0x0F
+-
+-        val isLeftCharging = if (isFlipped) (flags and 0x02) != 0 else (flags and 0x01) != 0
+-        val isRightCharging = if (isFlipped) (flags and 0x01) != 0 else (flags and 0x02) != 0
+-        val isCaseCharging = (flags and 0x04) != 0
+-
+-        val lidOpen = ((lid shr 3) and 0x01) == 0
+-
+-        fun decodeBattery(n: Int): Int? = when (n) {
+-            in 0x0..0x9 -> n * 10
+-            0xA -> 100
+-            in 0xB..0xF -> null
+-            else -> null
+-        }
+-
++        val reading = requireNotNull(PublicProximity.decode(data))
++        val caseLevel = publicCaseCache.read(address, reading.case, android.os.SystemClock.elapsedRealtime())
+         return AirPodsStatus(
+             address = address,
+-            lastSeen = System.currentTimeMillis(),
+-            paired = paired,
+-            model = model,
+-            leftBattery = decodeBattery(leftBatteryNibble),
+-            rightBattery = decodeBattery(rightBatteryNibble),
+-            caseBattery = decodeBattery(caseBattery),
+-            isLeftInEar = isLeftInEar,
+-            isRightInEar = isRightInEar,
+-            isLeftCharging = isLeftCharging,
+-            isRightCharging = isRightCharging,
+-            isCaseCharging = isCaseCharging,
+-            lidOpen = lidOpen,
+-            color = color,
+-            connectionState = conn
++            model = modelNames[reading.modelId] ?: "Unknown (${reading.modelId})",
++            leftBattery = reading.left, rightBattery = reading.right, caseBattery = caseLevel,
++            isLeftCharging = reading.leftCharging && reading.left != null,
++            isRightCharging = reading.rightCharging && reading.right != null,
++            // A cached level cannot establish the current charging state.
++            isCaseCharging = reading.caseCharging && reading.case != null,
++            isLeftInEar = reading.leftInEar, isRightInEar = reading.rightInEar,
++            lidOpen = reading.lidOpen,
++            color = colorNames[data[9].toInt() and 255] ?: "Unknown",
++            connectionState = connStates[data[10].toInt() and 255] ?: "Unknown"
+         )
+     }
+ 
+--- a/android/app/src/main/java/me/kavishdevar/librepods/utils/CasePopupPolicy.kt
++++ b/android/app/src/main/java/me/kavishdevar/librepods/utils/CasePopupPolicy.kt
+@@ -1,26 +1,18 @@
+-/* LibrePods original fork - Galaxy M51 experimental popup; AGPL-3.0-or-later. */
++/* LibrePods M51 — AGPL-3.0-or-later. Public BLE popup is opt-in, not identity proof. */
+ package me.kavishdevar.librepods.utils
+-
+-/** Gate for public (unverified) BLE events.  No cryptographic device identity is implied. */
+-internal class CasePopupPolicy(
+-    private val minimumRssiDbm: Int = -64,
+-    private val cooldownMs: Long = 60_000L
+-) {
++internal class CasePopupPolicy(private val minimumRssiDbm: Int = -64, private val cooldownMs: Long = 60_000L) {
+     private var lastPopupAtMs: Long? = null
+-
+-    fun canShow(
+-        model: String,
+-        lidOpen: Boolean,
+-        rssiDbm: Int,
+-        explicitlyEnabled: Boolean,
+-        hasBondedAirPods: Boolean,
+-        nowMs: Long
+-    ): Boolean {
++    private val seen = linkedMapOf<String, Pair<Boolean, Long>>()
++    fun canShow(model: String, lidOpen: Boolean, rssiDbm: Int, explicitlyEnabled: Boolean,
++        hasBondedAirPods: Boolean, nowMs: Long, address: String = ""): Boolean {
++        seen.entries.removeAll { nowMs - it.value.second > 60_000L }
++        val previous = seen[address]
++        seen[address] = lidOpen to nowMs
++        while (seen.size > 30) seen.remove(seen.keys.first())
+         if (!explicitlyEnabled || !hasBondedAirPods || model != "AirPods Pro 3") return false
+         if (!lidOpen || rssiDbm < minimumRssiDbm) return false
+-        val last = lastPopupAtMs
+-        return last == null || nowMs - last >= cooldownMs
++        val opening = previous == null || !previous.first || nowMs - previous.second > 15_000L
++        return opening && (lastPopupAtMs?.let { nowMs - it >= cooldownMs } ?: true)
+     }
+-
+     fun onShown(nowMs: Long) { lastPopupAtMs = nowMs }
+ }
+--- a/android/app/src/main/java/me/kavishdevar/librepods/utils/PopupWindow.kt
++++ b/android/app/src/main/java/me/kavishdevar/librepods/utils/PopupWindow.kt
+@@ -80,7 +80,7 @@
+         batteryValue(R.id.right_battery, R.id.right_charging, status.rightBattery, status.isRightCharging)
+         batteryValue(R.id.case_battery, R.id.case_charging, status.caseBattery, status.isCaseCharging)
+         view.findViewById<TextView>(R.id.battery_source_note).text =
+-            if (unverified) "≈ BLE público · dispositivo próximo não autenticado · imagem ilustrativa"
++            if (unverified) "≈ BLE público · não autenticado · estojo: última leitura até 30 s"
+             else "≈ Bateria via BLE · imagem ilustrativa dos AirPods"
+     }
+ 
+--- /dev/null
++++ b/android/app/src/main/java/me/kavishdevar/librepods/utils/PublicProximity.kt
+@@ -0,0 +1,66 @@
++/* LibrePods M51 — AGPL-3.0-or-later.
++ * Public format cross-checked against CAPod DualApplePods / ProximityPairing.
++ * Independent decoder; never interprets encrypted bytes as public percentages.
++ */
++package me.kavishdevar.librepods.utils
++
++internal object PublicProximity {
++    data class Reading(
++        val modelId: Int, val left: Int?, val right: Int?, val case: Int?,
++        val leftCharging: Boolean, val rightCharging: Boolean, val caseCharging: Boolean,
++        val leftInEar: Boolean, val rightInEar: Boolean, val lidOpen: Boolean
++    )
++
++    /** Apple manufacturer bytes, AFTER company ID. Continuity is a TLV stream. */
++    fun frame(bytes: ByteArray): ByteArray? {
++        var offset = 0
++        while (offset + 2 <= bytes.size) {
++            val type = bytes[offset].toInt() and 255
++            val length = bytes[offset + 1].toInt() and 255
++            val end = offset + 2 + length
++            if (end > bytes.size) return null
++            if (type == 7 && length == 25 && bytes[offset + 2].toInt() == 1)
++                return bytes.copyOfRange(offset, end)
++            offset = end
++        }
++        return null
++    }
++
++    // Reserved values 11..14 are not a trustworthy 100%; 15 is unavailable.
++    fun percent(nibble: Int): Int? = if (nibble in 0..10) nibble * 10 else null
++
++    fun decode(frame: ByteArray): Reading? {
++        if (frame.size != 27 || frame[0].toInt() != 7 || frame[1].toInt() != 25 || frame[2].toInt() != 1) return null
++        fun byte(i: Int) = frame[i].toInt() and 255
++        val status = byte(5)
++        val flipped = status and 0x20 == 0
++        val inCase = status and 0x40 != 0
++        val earFlip = flipped xor inCase
++        val pods = byte(6)
++        val flags = byte(7) ushr 4
++        val reliableLid = inCase || status and 0x04 != 0
++        return Reading(
++            (byte(3) shl 8) or byte(4),
++            percent(if (flipped) pods ushr 4 else pods and 15),
++            percent(if (flipped) pods and 15 else pods ushr 4),
++            percent(byte(7) and 15),
++            flags and (if (flipped) 2 else 1) != 0,
++            flags and (if (flipped) 1 else 2) != 0,
++            flags and 4 != 0,
++            status and (if (earFlip) 8 else 2) != 0,
++            status and (if (earFlip) 2 else 8) != 0,
++            reliableLid && byte(8) and 8 == 0
++        )
++    }
++}
++
++/** Short same-address cache. Unknown packets never extend the last valid reading. */
++internal class PublicCaseCache(private val ttlMs: Long = 30_000L) {
++    private val readings = linkedMapOf<String, Pair<Int, Long>>()
++    fun read(address: String, level: Int?, now: Long): Int? {
++        readings.entries.removeAll { now - it.value.second >= ttlMs || now < it.value.second }
++        if (level != null) readings[address] = level to now
++        while (readings.size > 30) readings.remove(readings.keys.first())
++        return level ?: readings[address]?.first
++    }
++}
+--- a/android/app/src/main/java/me/kavishdevar/librepods/utils/RootlessDiagnostics.kt
++++ b/android/app/src/main/java/me/kavishdevar/librepods/utils/RootlessDiagnostics.kt
+@@ -16,6 +16,7 @@
+     val total = AtomicInteger()
+     val apple = AtomicInteger()
+     val proximity = AtomicInteger()
++    val rejected = AtomicInteger()
+     val controlPackets = AtomicInteger()
+     val connectionAttempts = AtomicInteger()
+     val connectedAttempts = AtomicInteger()
+@@ -27,6 +28,7 @@
+ 
+     @Synchronized fun beginConnection() {
+         connectionAttempts.incrementAndGet()
++        controlPackets.set(0)
+         startedAt = SystemClock.elapsedRealtime()
+         connectDurationMs = null
+         failureCategory = "Aguardando resultado"
+@@ -61,6 +63,8 @@
+             "no matching constructor" in summary || "nosuchmethod" in summary ||
+                 "failed to create bluetoothsocket" in summary ->
+                 "Construtor BluetoothSocket incompatível com esta versão"
++            "read ret: -1" in summary ->
++                "Canal fechado durante negociação; causa não determinada (não prova timeout)"
+             "timeout" in summary || "timed out" in summary || "socket closed" in summary ->
+                 "Tempo esgotado / negociação L2CAP não concluída"
+             "connection refused" in summary || "connection rejected" in summary ->
+@@ -138,7 +142,7 @@
+         return "Esquerdo: ${value(s.leftBattery)}\n" +
+             "Direito: ${value(s.rightBattery)}\n" +
+             "Estojo: ${value(s.caseBattery)}\n" +
+-            "Bateria aproximada (passos de 10%). BLE não comprova identidade ou controle."
++            "Bateria aproximada (passos de 10%). Estojo: última leitura do mesmo anúncio, até 30 s. BLE não comprova identidade ou controle."
+     }
+ 
+     fun report(): String = """LibrePods · experimento Galaxy M51 (base v0.1.0-rc.4)
+@@ -148,6 +152,7 @@
+ Anúncios BLE: ${total.get()}
+ Anúncios Apple: ${apple.get()}
+ Mensagens de proximidade: ${proximity.get()}
++Anúncios Apple ignorados (outro formato ou inválidos): ${rejected.get()}
+ Etapa: $controlStage
+ Tentativas de L2CAP: ${connectionAttempts.get()}
+ L2CAP conectado: ${connectedAttempts.get()}
+--- /dev/null
++++ b/android/app/src/test/java/me/kavishdevar/librepods/utils/CasePopupPolicyTest.kt
+@@ -0,0 +1,23 @@
++package me.kavishdevar.librepods.utils
++import org.junit.Assert.*
++import org.junit.Test
++class CasePopupPolicyTest {
++    @Test fun sustainedOpenDoesNotRepeat() {
++        val p = CasePopupPolicy()
++        assertTrue(p.canShow("AirPods Pro 3", true, -40, true, true, 0, "A")); p.onShown(0)
++        for (t in 1000L..120000L step 1000L) assertFalse(p.canShow("AirPods Pro 3", true, -40, true, true, t, "A"))
++        assertFalse(p.canShow("AirPods Pro 3", false, -40, true, true, 121000, "A"))
++        assertTrue(p.canShow("AirPods Pro 3", true, -40, true, true, 122000, "A"))
++    }
++    @Test fun requiresOptInBondAndProximity() {
++        assertFalse(CasePopupPolicy().canShow("AirPods Pro 3", true, -40, false, true, 0))
++        assertFalse(CasePopupPolicy().canShow("AirPods Pro 3", true, -40, true, false, 0))
++        assertFalse(CasePopupPolicy().canShow("AirPods Pro 3", true, -85, true, true, 0))
++        assertFalse(CasePopupPolicy().canShow("AirPods Pro", true, -40, true, true, 0))
++    }
++    @Test fun rotatingAddressDoesNotBypassGlobalCooldown() {
++        val p = CasePopupPolicy()
++        assertTrue(p.canShow("AirPods Pro 3", true, -40, true, true, 0, "A")); p.onShown(0)
++        assertFalse(p.canShow("AirPods Pro 3", true, -40, true, true, 1000, "B"))
++    }
++}
+--- /dev/null
++++ b/android/app/src/test/java/me/kavishdevar/librepods/utils/PublicProximityTest.kt
+@@ -0,0 +1,72 @@
++package me.kavishdevar.librepods.utils
++import org.junit.Assert.*
++import org.junit.Test
++
++class PublicProximityTest {
++    // Synthetic protocol fixtures, NOT captured M51 traffic.
++    private fun frame(status: Int = 0x64, pods: Int = 0x99, caseFlags: Int = 0x01, lid: Int = 0) =
++        ByteArray(27).apply {
++            this[0] = 7; this[1] = 25; this[2] = 1; this[3] = 0x27; this[4] = 0x20
++            this[5] = status.toByte(); this[6] = pods.toByte(); this[7] = caseFlags.toByte(); this[8] = lid.toByte()
++        }
++    @Test fun reported9010Scenario() {
++        val r = PublicProximity.decode(frame())!!
++        assertEquals(90, r.left); assertEquals(90, r.right); assertEquals(10, r.case)
++        assertEquals(0x2720, r.modelId)
++    }
++    @Test fun unequalBatteriesLeftPrimary() {
++        val r = PublicProximity.decode(frame(pods = 0x38, caseFlags = 0x21))!!
++        assertEquals(80, r.left); assertEquals(30, r.right)
++        assertFalse(r.leftCharging); assertTrue(r.rightCharging)
++    }
++    @Test fun unequalBatteriesRightPrimary() {
++        val r = PublicProximity.decode(frame(status = 0x44, pods = 0x38, caseFlags = 0x21))!!
++        assertEquals(30, r.left); assertEquals(80, r.right)
++        assertTrue(r.leftCharging); assertFalse(r.rightCharging)
++    }
++    @Test fun unknownIsNotZero() {
++        val r = PublicProximity.decode(frame(pods = 0xff, caseFlags = 0xff))!!
++        assertNull(r.left); assertNull(r.right); assertNull(r.case)
++    }
++    @Test fun realZeroAndFullAreValid() {
++        val r = PublicProximity.decode(frame(pods = 0xa0, caseFlags = 0x0a))!!
++        assertEquals(0, r.left); assertEquals(100, r.right); assertEquals(100, r.case)
++    }
++    @Test fun reservedPercentagesAreUnknown() { for (n in 11..15) assertNull(PublicProximity.percent(n)) }
++    @Test fun truncatedFramesRejected() {
++        for (length in 0..26) { assertNull(PublicProximity.frame(frame().copyOf(length))); assertNull(PublicProximity.decode(frame().copyOf(length))) }
++    }
++    @Test fun unsupportedPrefixRejected() {
++        val f = frame().apply { this[2] = 7 }
++        assertNull(PublicProximity.frame(f)); assertNull(PublicProximity.decode(f))
++    }
++    @Test fun continuityMessageMayFollowAnotherTlv() {
++        assertArrayEquals(frame(), PublicProximity.frame(byteArrayOf(0x10, 2, 0, 0) + frame()))
++    }
++    @Test fun malformedTlvIsNotResynchronizedInsidePayload() {
++        assertNull(PublicProximity.frame(byteArrayOf(0x10, 100) + frame()))
++    }
++    @Test fun caseLidOnlyTrustedWithInCaseContext() {
++        assertTrue(PublicProximity.decode(frame())!!.lidOpen)
++        assertFalse(PublicProximity.decode(frame(lid = 8))!!.lidOpen)
++        assertFalse(PublicProximity.decode(frame(status = 0x20))!!.lidOpen)
++        assertFalse(PublicProximity.decode(frame(status = 0x10))!!.lidOpen)
++    }
++    @Test fun earOrientationMatchesPrimaryAndCase() {
++        assertTrue(PublicProximity.decode(frame(status = 0x22))!!.leftInEar)
++        assertFalse(PublicProximity.decode(frame(status = 0x22))!!.rightInEar)
++        assertTrue(PublicProximity.decode(frame(status = 0x08))!!.leftInEar)
++        assertTrue(PublicProximity.decode(frame(status = 0x68))!!.leftInEar)
++    }
++    @Test fun caseCacheExpiresAndUnknownDoesNotExtend() {
++        val c = PublicCaseCache()
++        assertEquals(10, c.read("A", 10, 0))
++        assertEquals(10, c.read("A", null, 29_999))
++        assertNull(c.read("A", null, 30_000))
++    }
++    @Test fun caseCacheNeverCrossesAddresses() {
++        val c = PublicCaseCache(); c.read("A", 10, 0)
++        assertNull(c.read("B", null, 1))
++        assertEquals(0, c.read("B", 0, 2))
++    }
++}
