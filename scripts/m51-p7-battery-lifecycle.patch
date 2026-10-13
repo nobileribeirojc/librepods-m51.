@@ -99,7 +99,15 @@
                  adapter.getProfileProxy(context, listener, BluetoothProfile.HEADSET)
 --- a/android/app/src/main/java/me/kavishdevar/librepods/services/AirPodsService.kt
 +++ b/android/app/src/main/java/me/kavishdevar/librepods/services/AirPodsService.kt
-@@ -190,67 +190,104 @@
+@@ -28,6 +28,7 @@
+ import android.app.PendingIntent
+ import android.app.Service
+ import android.appwidget.AppWidgetManager
++import android.bluetooth.BluetoothAdapter
+ import android.bluetooth.BluetoothDevice
+ import android.bluetooth.BluetoothManager
+ import android.bluetooth.BluetoothProfile
+@@ -190,67 +191,104 @@
      private var handleIncomingCallOnceConnected = false
  
      lateinit var bleManager: BLEManager
@@ -252,7 +260,7 @@
      }
  
      @SuppressLint("MissingPermission")
-@@ -276,30 +313,17 @@
+@@ -276,30 +314,17 @@
              m51LastBondMs = now
          }
          val decision = m51AutoBatteryPolicy.observe(status.address, rssiDbm, m51HasBond, now)
@@ -291,7 +299,7 @@
          batteryNotification.setBatteryFromBle(status)
          updateBattery()
          popupWindowM51?.takeIf { it.isShowing && popupAddressM51 == status.address }
-@@ -380,6 +404,7 @@
+@@ -380,6 +405,7 @@
              // Unverified broadcasts are not attributed to the authenticated paired identity.
              if (!sharedPreferences.getBoolean("m51_nearby_popup_opt_in", false)) return
              if (device.model != "AirPods Pro 3") return
@@ -299,7 +307,7 @@
              if (popupWindowM51?.isShowing == true) {
                  if (popupAddressM51 == device.address) popupWindowM51?.updateBle(device, true)
                  return
-@@ -405,6 +430,16 @@
+@@ -405,6 +431,16 @@
      }
      override fun onCreate() {
          super.onCreate()
@@ -316,7 +324,7 @@
          sharedPreferencesLogs = getSharedPreferences("packet_logs", MODE_PRIVATE)
  
          inMemoryLogs.addAll(sharedPreferencesLogs.getStringSet(packetLogKey, emptySet()) ?: emptySet())
-@@ -508,10 +543,10 @@
+@@ -508,10 +544,10 @@
  
              override fun onProximityKeysReceived(proximityKeys: ByteArray) {
                  val keys = aacpManager.parseProximityKeysResponse(proximityKeys)
@@ -329,7 +337,7 @@
                          putString(key.key.name, Base64.encode(key.value))
                      }
                  }
-@@ -854,8 +889,8 @@
+@@ -854,8 +890,8 @@
  
          val notification = NotificationCompat.Builder(this, "background_service_status")
              .setSmallIcon(R.drawable.airpods)
@@ -340,7 +348,16 @@
              .setContentIntent(pendingIntentNotifDisable)
              .setCategory(Notification.CATEGORY_SERVICE)
              .setPriority(NotificationCompat.PRIORITY_LOW)
-@@ -1520,11 +1555,12 @@
+@@ -1135,7 +1171,7 @@
+ 
+         val controlConnected = connected && aacpReady && ::socket.isInitialized && socket.isConnected
+         val bleValues = batteryList ?: batteryNotification.getBattery()
+-        val hasBleReading = !isConnectedLocally && bleValues.any { it.status != BatteryStatus.DISCONNECTED }
++        val hasBleReading = !controlConnected && bleValues.any { it.status != BatteryStatus.DISCONNECTED }
+         if (controlConnected) {
+             updatedNotification = NotificationCompat.Builder(this, "airpods_connection_status")
+                 .setSmallIcon(R.drawable.airpods)
+@@ -1520,11 +1556,12 @@
          Log.d("AirPodsService", "Service started")
          ServiceManager.setService(this)
          startForegroundNotification()
@@ -357,7 +374,7 @@
  
          sharedPreferences = getSharedPreferences("settings", MODE_PRIVATE)
  
-@@ -1826,10 +1862,7 @@
+@@ -1826,10 +1863,7 @@
              clearPacketLogs()
          }
  
@@ -369,7 +386,7 @@
          return START_STICKY
      }
  
-@@ -2305,10 +2338,10 @@
+@@ -2305,10 +2339,10 @@
  
      @SuppressLint("MissingPermission")
      override fun onDestroy() {
@@ -690,7 +707,7 @@
  Anúncios Apple ignorados (outro formato ou inválidos): ${rejected.get()}
 --- /dev/null
 +++ b/android/app/src/test/java/me/kavishdevar/librepods/utils/M51BatteryPipelineTest.kt
-@@ -0,0 +1,82 @@
+@@ -0,0 +1,97 @@
 +package me.kavishdevar.librepods.utils
 +
 +import org.junit.Assert.*
@@ -764,6 +781,21 @@
 +        val h = M51BatteryHistory()
 +        h.observe("A", reading(), 9999, 9999)
 +        assertNull(h.observe("A", reading(case = 15), 1, 1)!!.case)
++    }
++    @Test fun displaySnapshotExpiresWithoutAnotherAdvertisement() {
++        val s = BLEManager.AirPodsStatus(address = "A", leftBattery = 80, rightBattery = 30, caseBattery = 10,
++            observedMs = 1000, leftObservedMs = 1000, rightObservedMs = 1000, caseObservedMs = 1000,
++            isLeftCharging = true, isCaseCharging = true)
++        assertEquals(80, s.fresh(15999).leftBattery)
++        val stale = s.fresh(16000)
++        assertNull(stale.leftBattery); assertNull(stale.rightBattery)
++        assertEquals(10, stale.caseBattery); assertFalse(stale.isCaseCharging)
++        assertNull(s.fresh(31000).caseBattery)
++    }
++    @Test fun unavailableRssiCannotBecomeStrongestSource() {
++        val p = M51AutoBatteryPolicy()
++        assertEquals(M51AutoBatteryPolicy.Decision.WEAK_SIGNAL, p.observe("invalid", 127, true, 0))
++        assertEquals(M51AutoBatteryPolicy.Decision.CHOSEN_SOURCE, p.observe("A", -60, true, 1))
 +    }
 +    @Test fun allNibbleCombinationsRespectOrientationAndUnknown() {
 +        for (primary in listOf(0x64, 0x44)) for (a in 0..15) for (b in 0..15) {
