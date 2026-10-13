@@ -45,7 +45,7 @@ service = replace_once(service,
             m51LastBondMs = now
         }
         val decision = m51AutoBatteryPolicy.observe(status.address, rssiDbm, m51HasBond, now)
-        if (decision != M51AutoBatteryPolicy.Decision.SINGLE_NEARBY) return
+        if (decision != M51AutoBatteryPolicy.Decision.CHOSEN_SOURCE) return
         manualBleHandler.post {
             // Never replace an explicitly selected source or a working AACP channel.
             if (manualBleAddress != null || (isConnectedLocally && aacpReady)) return@post
@@ -145,18 +145,32 @@ package me.kavishdevar.librepods.utils
 internal class M51AutoBatteryPolicy(
     private val freshnessMs: Long = 6_000L, private val minimumRssiDbm: Int = -85
 ) {
-    enum class Decision { SINGLE_NEARBY, AMBIGUOUS, NO_BOND, WEAK_SIGNAL }
-    private val lastSeen = linkedMapOf<String, Long>()
+    enum class Decision { CHOSEN_SOURCE, OTHER_SOURCE, NO_BOND, WEAK_SIGNAL }
+    private data class Candidate(val timeMs: Long, val rssiDbm: Int)
+    private val candidates = linkedMapOf<String, Candidate>()
+    private var chosenAddress: String? = null
 
     @Synchronized
     fun observe(address: String, rssiDbm: Int, hasBondedAirPods: Boolean, nowMs: Long): Decision {
-        lastSeen.entries.removeAll { nowMs < it.value || nowMs - it.value >= freshnessMs }
-        if (address.isNotBlank() && rssiDbm >= minimumRssiDbm) lastSeen[address] = nowMs
+        candidates.entries.removeAll { nowMs < it.value.timeMs ||
+            nowMs - it.value.timeMs >= freshnessMs }
+        if (!candidates.containsKey(chosenAddress)) chosenAddress = null
+        if (address.isNotBlank() && rssiDbm >= minimumRssiDbm) {
+            candidates[address] = Candidate(nowMs, rssiDbm)
+        }
         if (!hasBondedAirPods) return Decision.NO_BOND
         if (address.isBlank() || rssiDbm < minimumRssiDbm) return Decision.WEAK_SIGNAL
-        // More than one BLE address might be another person's Pro3 or rotating addresses.
-        if (lastSeen.size != 1) return Decision.AMBIGUOUS
-        return Decision.SINGLE_NEARBY
+
+        // Approach inspired by OpenPods' strongest-recent-advert logic,
+        // reimplemented independently with 8 dBm hysteresis. Proximity is NOT identity!
+        val strongest = candidates.maxByOrNull { it.value.rssiDbm } ?: return Decision.WEAK_SIGNAL
+        if (chosenAddress == null) chosenAddress = strongest.key
+        val selectedSignal = candidates[chosenAddress]?.rssiDbm
+        if (strongest.key != chosenAddress &&
+            selectedSignal != null && strongest.value.rssiDbm - selectedSignal >= 8) {
+            chosenAddress = strongest.key
+        }
+        return if (chosenAddress == address) Decision.CHOSEN_SOURCE else Decision.OTHER_SOURCE
     }
 }
 """
@@ -170,14 +184,22 @@ import org.junit.Test
 class M51AutoBatteryPolicyTest {
     @Test fun oneFreshCandidateEnablesPreview() {
         val gate = M51AutoBatteryPolicy()
-        assertEquals(M51AutoBatteryPolicy.Decision.SINGLE_NEARBY, gate.observe("A", -50, true, 1))
-        assertEquals(M51AutoBatteryPolicy.Decision.SINGLE_NEARBY, gate.observe("A", -60, true, 200))
+        assertEquals(M51AutoBatteryPolicy.Decision.CHOSEN_SOURCE, gate.observe("A", -50, true, 1))
+        assertEquals(M51AutoBatteryPolicy.Decision.CHOSEN_SOURCE, gate.observe("A", -60, true, 200))
     }
-    @Test fun twoNearbySourcesMustNotSilentlyChooseOne() {
+    @Test fun strongerRecentAdvertWinsWithoutPretendingIdentity() {
         val gate = M51AutoBatteryPolicy()
-        gate.observe("A", -50, true, 10)
-        assertEquals(M51AutoBatteryPolicy.Decision.AMBIGUOUS, gate.observe("B", -55, true, 100))
-        assertEquals(M51AutoBatteryPolicy.Decision.SINGLE_NEARBY, gate.observe("B", -55, true, 6_010))
+        gate.observe("A", -64, true, 10)
+        assertEquals(M51AutoBatteryPolicy.Decision.CHOSEN_SOURCE, gate.observe("B", -50, true, 100))
+        assertEquals(M51AutoBatteryPolicy.Decision.OTHER_SOURCE, gate.observe("A", -64, true, 200))
+        assertEquals(M51AutoBatteryPolicy.Decision.CHOSEN_SOURCE, gate.observe("B", -50, true, 300))
+    }
+    @Test fun nearTieUsesHysteresisUntilOriginalSourceExpires() {
+        val gate = M51AutoBatteryPolicy()
+        gate.observe("A", -60, true, 0)
+        assertEquals(M51AutoBatteryPolicy.Decision.OTHER_SOURCE, gate.observe("B", -56, true, 500))
+        assertEquals(M51AutoBatteryPolicy.Decision.CHOSEN_SOURCE, gate.observe("A", -60, true, 1_000))
+        assertEquals(M51AutoBatteryPolicy.Decision.CHOSEN_SOURCE, gate.observe("B", -56, true, 7_001))
     }
     @Test fun previewRequiresBondAndSignal() {
         val gate = M51AutoBatteryPolicy()
@@ -187,7 +209,7 @@ class M51AutoBatteryPolicyTest {
     @Test fun clocksGoingBackwardsEvictOldFrames() {
         val gate = M51AutoBatteryPolicy()
         gate.observe("A", -55, true, 9999)
-        assertEquals(M51AutoBatteryPolicy.Decision.SINGLE_NEARBY, gate.observe("B", -44, true, 1))
+        assertEquals(M51AutoBatteryPolicy.Decision.CHOSEN_SOURCE, gate.observe("B", -44, true, 1))
     }
 }
 """
