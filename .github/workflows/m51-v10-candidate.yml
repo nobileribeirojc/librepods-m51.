@@ -40,6 +40,19 @@ jobs:
         run: python3 scripts/m51-p6-service-fallback.py source/LibrePods-M51-v4
       - name: Apply battery history and service lifecycle regression fixes
         run: git apply --directory=source/LibrePods-M51-v4 scripts/m51-p7-battery-lifecycle.patch
+      - name: Set candidate versionCode 20 and versionName v10
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          f=Path('source/LibrePods-M51-v4/android/app/build.gradle.kts')
+          original=f.read_text()
+          assert 'versionCode = 19' in original, 'Unexpected versionCode'
+          assert 'versionName = "0.1.0-rc.4-m51-v9-ble-recovery"' in original, 'Unexpected versionName'
+          updated=original.replace('versionCode = 19','versionCode = 20').replace('versionName = "0.1.0-rc.4-m51-v9-ble-recovery"','versionName = "0.1.0-rc.5-m51-v10-physical-test"')
+          f.write_text(updated)
+          print('Prepared LibrePods M51 v10 candidate identity')
+          PY
       - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
@@ -94,7 +107,7 @@ jobs:
           AAPT="$ANDROID_HOME/build-tools/35.0.0/aapt"
           SIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
           "$AAPT" dump badging "$APK" | tee output/APK-PACKAGE.txt
-          grep -F "package: name='me.kavishdevar.librepods.m51test'" output/APK-PACKAGE.txt
+          grep -F "package: name='me.kavishdevar.librepods.m51test' versionCode='20' versionName='0.1.0-rc.5-m51-v10-physical-test'" output/APK-PACKAGE.txt
           "$SIGNER" verify --verbose --print-certs "$APK" > output/APK-SIGNATURE.txt
           cp docs/M51-PR4-REGRESSION-REPORT.md output/
           (cd output && sha256sum LibrePods-M51-v10-TESTE-debug.apk > SHA256SUMS.txt)
