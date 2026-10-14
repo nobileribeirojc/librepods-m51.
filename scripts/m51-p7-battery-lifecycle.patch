@@ -107,11 +107,12 @@
  import android.bluetooth.BluetoothDevice
  import android.bluetooth.BluetoothManager
  import android.bluetooth.BluetoothProfile
-@@ -190,67 +191,104 @@
+@@ -190,67 +191,105 @@
      private var handleIncomingCallOnceConnected = false
  
      lateinit var bleManager: BLEManager
 +    private var m51Started = false
++    @Volatile private var m51Destroyed = false
 +    private val m51EnvironmentReceiver = object : BroadcastReceiver() {
 +        override fun onReceive(context: Context?, intent: Intent?) {
 +            when (intent?.action) {
@@ -260,7 +261,7 @@
      }
  
      @SuppressLint("MissingPermission")
-@@ -276,30 +314,17 @@
+@@ -276,30 +315,17 @@
              m51LastBondMs = now
          }
          val decision = m51AutoBatteryPolicy.observe(status.address, rssiDbm, m51HasBond, now)
@@ -299,7 +300,7 @@
          batteryNotification.setBatteryFromBle(status)
          updateBattery()
          popupWindowM51?.takeIf { it.isShowing && popupAddressM51 == status.address }
-@@ -380,6 +405,7 @@
+@@ -380,6 +406,7 @@
              // Unverified broadcasts are not attributed to the authenticated paired identity.
              if (!sharedPreferences.getBoolean("m51_nearby_popup_opt_in", false)) return
              if (device.model != "AirPods Pro 3") return
@@ -307,7 +308,7 @@
              if (popupWindowM51?.isShowing == true) {
                  if (popupAddressM51 == device.address) popupWindowM51?.updateBle(device, true)
                  return
-@@ -405,6 +431,16 @@
+@@ -405,6 +432,16 @@
      }
      override fun onCreate() {
          super.onCreate()
@@ -324,7 +325,7 @@
          sharedPreferencesLogs = getSharedPreferences("packet_logs", MODE_PRIVATE)
  
          inMemoryLogs.addAll(sharedPreferencesLogs.getStringSet(packetLogKey, emptySet()) ?: emptySet())
-@@ -508,10 +544,10 @@
+@@ -508,10 +545,10 @@
  
              override fun onProximityKeysReceived(proximityKeys: ByteArray) {
                  val keys = aacpManager.parseProximityKeysResponse(proximityKeys)
@@ -337,7 +338,7 @@
                          putString(key.key.name, Base64.encode(key.value))
                      }
                  }
-@@ -854,8 +890,8 @@
+@@ -854,8 +891,8 @@
  
          val notification = NotificationCompat.Builder(this, "background_service_status")
              .setSmallIcon(R.drawable.airpods)
@@ -348,7 +349,7 @@
              .setContentIntent(pendingIntentNotifDisable)
              .setCategory(Notification.CATEGORY_SERVICE)
              .setPriority(NotificationCompat.PRIORITY_LOW)
-@@ -1135,7 +1171,7 @@
+@@ -1135,7 +1172,7 @@
  
          val controlConnected = connected && aacpReady && ::socket.isInitialized && socket.isConnected
          val bleValues = batteryList ?: batteryNotification.getBattery()
@@ -357,7 +358,7 @@
          if (controlConnected) {
              updatedNotification = NotificationCompat.Builder(this, "airpods_connection_status")
                  .setSmallIcon(R.drawable.airpods)
-@@ -1520,11 +1556,12 @@
+@@ -1520,11 +1557,12 @@
          Log.d("AirPodsService", "Service started")
          ServiceManager.setService(this)
          startForegroundNotification()
@@ -374,7 +375,7 @@
  
          sharedPreferences = getSharedPreferences("settings", MODE_PRIVATE)
  
-@@ -1826,10 +1863,7 @@
+@@ -1826,10 +1864,7 @@
              clearPacketLogs()
          }
  
@@ -386,7 +387,53 @@
          return START_STICKY
      }
  
-@@ -2305,10 +2339,10 @@
+@@ -2084,12 +2119,13 @@
+                                 val bytesRead = it.inputStream.read(buffer)
+                                 var data: ByteArray = byteArrayOf()
+                                 if (bytesRead > 0) {
+-                                    RootlessDiagnostics.controlPackets.incrementAndGet()
+-                                    RootlessDiagnostics.stage("Pacotes AACP recebidos: comunicação bidirecional")
+                                     data = buffer.copyOfRange(0, bytesRead)
+-                                    if (!aacpReady && data.size >= 6 &&
+-                                        data[0] == 4.toByte() && data[1] == 0.toByte() &&
+-                                        data[2] == 4.toByte() && data[3] == 0.toByte()) {
++                                    val hasAacpHeader = me.kavishdevar.librepods.utils.M51AacpEvidence.hasHeader(data)
++                                    if (hasAacpHeader) {
++                                        RootlessDiagnostics.controlPackets.incrementAndGet()
++                                        RootlessDiagnostics.stage("Cabeçalho AACP recebido; recursos individuais ainda não validados")
++                                    }
++                                    if (!aacpReady && hasAacpHeader) {
+                                         aacpReady = true
+                                         sendBroadcast(Intent(AirPodsNotifications.AIRPODS_CONNECTED)
+                                             .putExtra("device", device))
+@@ -2126,9 +2162,16 @@
+                         aacpReady = false
+                         isConnectedLocally = false
+                         try { sessionSocket.close() } catch (_: Exception) {}
+-                        batteryNotification.clearPublicBleBattery()
++                        BluetoothConnectionManager.clearCurrentConnection(sessionSocket)
+                         sendBroadcast(Intent(AirPodsNotifications.AIRPODS_DISCONNECTED))
+-                        manualBleHandler.post { updateBattery() }
++                        manualBleHandler.post {
++                            if (m51Destroyed) return@post
++                            // AACP may have overwritten the same values: invalidate the
++                            // BLE publication cache before resuming, even when unchanged.
++                            m51Published = null
++                            batteryNotification.clearPublicBleBattery()
++                            if (m51Displayed != null) publishM51Ble() else updateBattery()
++                        }
+                       }
+                     }
+                 }
+@@ -2139,6 +2182,7 @@
+                 aacpReady = false
+                 isConnectedLocally = false
+                 try { socket.close() } catch (_: Exception) {}
++                BluetoothConnectionManager.clearCurrentConnection(socket)
+                 this@AirPodsService.device = device
+                 updateNotificationContent(false)
+             }
+@@ -2305,10 +2349,16 @@
  
      @SuppressLint("MissingPermission")
      override fun onDestroy() {
@@ -394,7 +441,13 @@
 -        m51AutoExpiry?.let { manualBleHandler.removeCallbacks(it) }
 -        m51AutoExpiry = null
 -        manualBleResetTask = null
++        m51Destroyed = true
 +        unregisterReceiver(m51EnvironmentReceiver)
++        if (::socket.isInitialized) {
++            try { socket.close() } catch (_: Exception) { }
++            BluetoothConnectionManager.clearCurrentConnection(socket)
++        }
++        aacpReady = false
 +        ServiceManager.setService(null)
 +        manualBleHandler.removeCallbacksAndMessages(null)
 +        m51Displayed = null
@@ -610,6 +663,33 @@
              isLeftCharging = reading.leftCharging && reading.left != null,
              isRightCharging = reading.rightCharging && reading.right != null,
              // A cached level cannot establish the current charging state.
+--- a/android/app/src/main/java/me/kavishdevar/librepods/utils/BluetoothConnectionManager.kt
++++ b/android/app/src/main/java/me/kavishdevar/librepods/utils/BluetoothConnectionManager.kt
+@@ -34,6 +34,14 @@
+         Log.d(TAG, "Current connection set to device: ${device.address}")
+     }
+ 
++    @Synchronized
++    fun clearCurrentConnection(expected: BluetoothSocket) {
++        if (currentSocket === expected) {
++            currentSocket = null
++            currentDevice = null
++        }
++    }
++
+     fun getCurrentSocket(): BluetoothSocket? {
+         return currentSocket
+     }
+--- /dev/null
++++ b/android/app/src/main/java/me/kavishdevar/librepods/utils/M51AacpEvidence.kt
+@@ -0,0 +1,7 @@
++/* LibrePods M51, AGPL-3.0-or-later. Header evidence is not feature validation. */
++package me.kavishdevar.librepods.utils
++internal object M51AacpEvidence {
++    fun hasHeader(data: ByteArray): Boolean = data.size >= 6 &&
++        data[0] == 4.toByte() && data[1] == 0.toByte() &&
++        data[2] == 4.toByte() && data[3] == 0.toByte()
++}
 --- a/android/app/src/main/java/me/kavishdevar/librepods/utils/M51AutoBatteryPolicy.kt
 +++ b/android/app/src/main/java/me/kavishdevar/librepods/utils/M51AutoBatteryPolicy.kt
 @@ -14,11 +14,15 @@
@@ -686,7 +766,26 @@
      val total = AtomicInteger()
      val apple = AtomicInteger()
      val proximity = AtomicInteger()
-@@ -130,7 +141,7 @@
+@@ -50,7 +61,7 @@
+         controlStatus = "L2CAP conectado; aguardando pacotes AACP"
+     }
+ 
+-    private fun classify(error: Throwable): String {
++    internal fun classify(error: Throwable): String {
+         val summary = generateSequence(error) { it.cause }
+             .take(5)
+             .joinToString(" ") { "${it.javaClass.simpleName} ${it.message.orEmpty()}" }
+@@ -66,7 +77,8 @@
+                 "Construtor BluetoothSocket incompatível com esta versão"
+             "read ret: -1" in summary ->
+                 "Canal fechado durante negociação; causa não determinada (não prova timeout)"
+-            "timeout" in summary || "timed out" in summary || "socket closed" in summary ->
++            "socket closed" in summary -> "Socket fechado; não comprova timeout ou defeito da pilha"
++            "timeout" in summary || "timed out" in summary ->
+                 "Tempo esgotado / negociação L2CAP não concluída"
+             "connection refused" in summary || "connection rejected" in summary ->
+                 "Conexão rejeitada pelo periférico ou pela pilha"
+@@ -130,7 +142,7 @@
          prune()
          val candidate = candidates[selected] ?: return null
          if (SystemClock.elapsedRealtime() - candidate.seenAt > FRESH_MS) return null
@@ -695,7 +794,7 @@
      }
  
      @Synchronized fun battery(): String {
-@@ -151,6 +162,9 @@
+@@ -151,6 +163,9 @@
  Patch de segurança: ${android.os.Build.VERSION.SECURITY_PATCH}
  $scanStatus
  Anúncios BLE: ${total.get()}
@@ -803,5 +902,35 @@
 +            assertEquals(PublicProximity.percent(if (primary == 0x64) b else a), r.left)
 +            assertEquals(PublicProximity.percent(if (primary == 0x64) a else b), r.right)
 +        }
++    }
++}
+--- /dev/null
++++ b/android/app/src/test/java/me/kavishdevar/librepods/utils/M51TransportEvidenceTest.kt
+@@ -0,0 +1,27 @@
++package me.kavishdevar.librepods.utils
++import org.junit.Assert.*
++import org.junit.Test
++import java.io.IOException
++
++class M51TransportEvidenceTest {
++    @Test fun genericReadFailureDoesNotProveTimeout() {
++        val s = RootlessDiagnostics.classify(IOException("read failed, socket might closed or timeout, read ret: -1"))
++        assertTrue(s.contains("não prova timeout"))
++    }
++    @Test fun socketClosureIsNotTimeoutEvidence() {
++        assertTrue(RootlessDiagnostics.classify(IOException("socket closed")).contains("não comprova timeout"))
++    }
++    @Test fun wrappedPermissionFailureRemainsPermissionFailure() {
++        assertTrue(RootlessDiagnostics.classify(RuntimeException(SecurityException("BLUETOOTH_CONNECT"))).contains("Permissão"))
++    }
++    @Test fun realTimeoutIsDistinguished() {
++        assertTrue(RootlessDiagnostics.classify(IOException("timed out")).contains("Tempo esgotado"))
++    }
++    @Test fun shortAndRandomBytesDoNotSetAacpReady() {
++        for (n in 0..5) assertFalse(M51AacpEvidence.hasHeader(ByteArray(n)))
++        assertFalse(M51AacpEvidence.hasHeader(byteArrayOf(1, 2, 3, 4, 5, 6)))
++    }
++    @Test fun actualHeaderIsOnlyProtocolEvidence() {
++        assertTrue(M51AacpEvidence.hasHeader(byteArrayOf(4, 0, 4, 0, 7, 0)))
 +    }
 +}
