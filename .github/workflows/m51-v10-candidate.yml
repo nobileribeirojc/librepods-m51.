@@ -1,0 +1,114 @@
+name: LibrePods M51 v10 physical-test candidate (49 regressions + APK)
+on:
+  push:
+    branches: [m51-v10-physical-test-candidate]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruct original LibrePods through v8
+        shell: bash
+        run: |
+          set -euo pipefail
+          unzip -q LibrePods-M51-v4-pronto-para-compilar.zip -d source
+          python3 source/LibrePods-M51-v4/tools/verify-m51-source.py
+          python3 scripts/fix-m51-unknown-battery.py source/LibrePods-M51-v4
+          python3 scripts/m51-v5-public-ble-preview.py source/LibrePods-M51-v4
+          python3 scripts/m51-v6-ble-continuo.py source/LibrePods-M51-v4
+          git apply --directory=source/LibrePods-M51-v4 scripts/m51-v7.patch
+          python3 scripts/m51-v8-lifecycle-ble.py source/LibrePods-M51-v4
+      - name: Preserve v9 Bluetooth recovery patch
+        run: python3 scripts/m51-v9-ble-recovery.py source/LibrePods-M51-v4
+      - name: Apply audited auto-battery and audio fixes (no version bump)
+        run: python3 scripts/m51-p0-source-fixes.py source/LibrePods-M51-v4
+      - name: Prevent automatic L2CAP spam on rootless Android 12
+        run: python3 scripts/m51-p1-l2cap-guard.py source/LibrePods-M51-v4
+      - name: Show diagnostic directly on home screen
+        run: python3 scripts/m51-p2-visible-diagnostics.py source/LibrePods-M51-v4
+      - name: Gate ALL Android 12 automatic L2CAP attempts and quiet notices
+        run: python3 scripts/m51-p3-l2cap-quiet.py source/LibrePods-M51-v4
+      - name: Recover Samsung Android 12 BLE scanner and broken filters
+        run: python3 scripts/m51-p4-ble-recovery.py source/LibrePods-M51-v4
+      - name: Fix Compose service status and preferences observer lifecycle
+        run: python3 scripts/m51-p5-compose-state.py source/LibrePods-M51-v4
+      - name: Show home-screen recovery if Bluetooth service fails
+        run: python3 scripts/m51-p6-service-fallback.py source/LibrePods-M51-v4
+      - name: Apply battery history and service lifecycle regression fixes
+        run: git apply --directory=source/LibrePods-M51-v4 scripts/m51-p7-battery-lifecycle.patch
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - name: Install SDK platform 35
+        run: sdkmanager --install 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Run regressions and build candidate only when tests pass
+        working-directory: source/LibrePods-M51-v4/android
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon --stacktrace
+      - name: Gate candidate on actual JUnit results
+        run: |
+          python3 - <<'PYTEST'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          files=list(Path('source/LibrePods-M51-v4/android/app/build/test-results').rglob('TEST-*.xml'))
+          assert files, 'No JUnit results generated'
+          total=failed=errors=0
+          for p in files:
+              root=ET.parse(p).getroot()
+              total+=int(root.get('tests',0)); failed+=int(root.get('failures',0)); errors+=int(root.get('errors',0))
+              print(p.name, root.attrib)
+          print(f'TOTAL tests={total} failures={failed} errors={errors}')
+          assert total >= 49 and failed == 0 and errors == 0
+          PYTEST
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: m51-v10-candidate-test-reports
+          path: |
+            source/LibrePods-M51-v4/android/app/build/test-results/
+            source/LibrePods-M51-v4/android/app/build/reports/tests/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Verify package and signature; prepare single test APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=source/LibrePods-M51-v4/android/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          mkdir -p output
+          cp "$APK" output/LibrePods-M51-v10-TESTE-debug.apk
+          AAPT="$ANDROID_HOME/build-tools/35.0.0/aapt"
+          SIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
+          "$AAPT" dump badging "$APK" | tee output/APK-PACKAGE.txt
+          grep -F "package: name='me.kavishdevar.librepods.m51test'" output/APK-PACKAGE.txt
+          "$SIGNER" verify --verbose --print-certs "$APK" > output/APK-SIGNATURE.txt
+          cp docs/M51-PR4-REGRESSION-REPORT.md output/
+          (cd output && sha256sum LibrePods-M51-v10-TESTE-debug.apk > SHA256SUMS.txt)
+          printf '%s\n' \
+            "LibrePods M51 v10 - CANDIDATE FOR PHYSICAL TESTING ONLY" \
+            "GitHub commit: $GITHUB_SHA" \
+            "Source: original LibrePods v4 archive + v5-v9 scripts + p0-p7 patches on this branch" \
+            "Public BLE batteries are approximate and unverified; no claim of working AACP or ANC." \
+            "Debug key is generated per CI runner; if Android reports an incompatible update signature, do not confuse that with BLE failures." \
+            > output/README-TESTE.txt
+      - name: Publish ONLY candidate build artifact and validation evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: LibrePods-M51-v10-TESTE-49-regressoes
+          path: output/
+          if-no-files-found: error
+          retention-days: 30
