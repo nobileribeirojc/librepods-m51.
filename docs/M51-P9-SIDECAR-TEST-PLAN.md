@@ -85,3 +85,30 @@ Only after user explicitly approves installation of the sidecar APK:
   zero-loss migration has yet been demonstrated; do not wipe p8.
 - The local p9 report `docs/M51-P9-LOCAL-BUILD-2026-10-16.md` may still
   be solely on the Windows laptop. Preserve it; do not pretend it is uploaded.
+
+## Verified build outcome (2026-10-16)
+
+CI run `38983101104`, source commit `ab7fa0af74d907f22e2784a680aa00335d4ca12b`:
+**completed / success**. JUnit: **41 tests passed** and zero
+failures/errors. `assembleDebug` passed; `apksigner verify` succeeded.
+
+The actual APK manifest/badging, not just Gradle source, confirmed:
+
+- applicationId: `me.kavishdevar.librepods.m51test.p9sidecar`
+- versionName: `0.1.0-rc.4-m51-v9-ble-recovery-sidecar`
+- minSdk: 31, targetSdk: 35
+- application label: `LibrePods M51 p9 (paralelo)`
+- FileProvider: `me.kavishdevar.librepods.m51test.p9sidecar.provider`
+- BootReceiver: `android:enabled=false`
+- APK SHA256: `423cfdcf893ff4b771a68aeaf50a6b5518f8771b4e7ae3f7916d7fbb1616496d`
+- Debug certificate SHA256:
+  `a76e5fd5a9cc6b69830934036e4067acf63715ca2e9bd3303e0ed84de623a656`
+
+Artifact ID `12081533179`, retained by GitHub Actions for 30 days:
+[Download from GitHub Actions](https://github.com/nobileribeirojc/librepods-m51./actions/runs/38983101104).
+
+This **does not mean the experimental APK was installed or tested on the
+Samsung M51**. Debug signing is ephemeral in hosted CI unless a stable
+private keystore is securely provided; do not assume future sidecar
+APK builds can update this one in place. This candidate is disposable,
+and neither its data nor p8's data was changed during CI.
