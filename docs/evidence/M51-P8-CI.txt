@@ -1,0 +1,15 @@
+Source commit: 7a5d4c3f5c8b491df1163e1dcf5acf20c5f610fe
+Run: 38958062630
+Job: 117165840165
+Conclusion: success
+Command: ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
+No assembleDebug task; APK workflow run 38958068972 skipped.
+2026-10-16T19:52:14.7052903Z test_internal_retries_do_not_reset_failure_budget (__main__.ReconstructedSourceChecks.test_internal_retries_do_not_reset_failure_budget) ... ok
+2026-10-16T19:52:14.7054509Z test_late_single_and_batch_callbacks_cannot_deliver_data (__main__.ReconstructedSourceChecks.test_late_single_and_batch_callbacks_cannot_deliver_data) ... ok
+2026-10-16T19:52:14.7056480Z test_old_callback_is_stopped_before_new_callback_assignment (__main__.ReconstructedSourceChecks.test_old_callback_is_stopped_before_new_callback_assignment) ... ok
+2026-10-16T19:52:14.7057814Z test_prior_battery_and_transport_paths_remain (__main__.ReconstructedSourceChecks.test_prior_battery_and_transport_paths_remain) ... ok
+2026-10-16T19:52:14.7059085Z test_unknown_lid_survives_decoder_to_popup_policy (__main__.ReconstructedSourceChecks.test_unknown_lid_survives_decoder_to_popup_policy) ... ok
+2026-10-16T19:52:14.7060668Z Ran 5 tests in 0.001s
+2026-10-16T19:54:17.0429656Z > Task :app:compileDebugKotlin
+2026-10-16T19:54:36.2479980Z > Task :app:testDebugUnitTest
+2026-10-16T19:54:36.2538692Z BUILD SUCCESSFUL in 2m 13s
