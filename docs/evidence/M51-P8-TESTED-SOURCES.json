@@ -1,0 +1,42 @@
+[
+  {
+    "file": "android\\app\\src\\main\\java\\me\\kavishdevar\\librepods\\utils\\PublicProximity.kt",
+    "sha256": "2aa9c353ccfa29d9181054e90e7042c8624eed4e5445776e946599347baaed08"
+  },
+  {
+    "file": "android\\app\\src\\test\\java\\me\\kavishdevar\\librepods\\utils\\PublicProximityTest.kt",
+    "sha256": "2f3241526669639f4ecc8fb92ee066d41b6f5ad5bba097a61031e2006278d131"
+  },
+  {
+    "file": "android\\app\\src\\main\\java\\me\\kavishdevar\\librepods\\utils\\CasePopupPolicy.kt",
+    "sha256": "a1d4602eae895bf6e9b83f3f742b174de16dd50e9944489d1e901a1bcaf4be49"
+  },
+  {
+    "file": "android\\app\\src\\test\\java\\me\\kavishdevar\\librepods\\utils\\CasePopupPolicyTest.kt",
+    "sha256": "fbe76336b200eef5f3998d388e0b1631fd7d3c994121b1545f0de64f0f88761d"
+  },
+  {
+    "file": "android\\app\\src\\main\\java\\me\\kavishdevar\\librepods\\utils\\M51AutoBatteryPolicy.kt",
+    "sha256": "65c315dacd4efb30a73cdae2034197dfd62fc6b541bfe9080b77b86407de2d72"
+  },
+  {
+    "file": "android\\app\\src\\test\\java\\me\\kavishdevar\\librepods\\utils\\M51AutoBatteryPolicyTest.kt",
+    "sha256": "efee12871c8b34cbdbb93160db2b1b958a424c5feebe5c27127bdb6d91bfdac5"
+  },
+  {
+    "file": "android\\app\\src\\main\\java\\me\\kavishdevar\\librepods\\utils\\M51ControlTransportPolicy.kt",
+    "sha256": "07697f0b0ee4921956175d029b962c0b1763430dac62530843049693a116f6d1"
+  },
+  {
+    "file": "android\\app\\src\\test\\java\\me\\kavishdevar\\librepods\\utils\\M51ControlTransportPolicyTest.kt",
+    "sha256": "507ffc8adb5edfa2887fc5fa4b3ff2ada9797b21abe9237b658fd3cb77677b13"
+  },
+  {
+    "file": "android\\app\\src\\main\\java\\me\\kavishdevar\\librepods\\utils\\M51ScanRecoveryPolicy.kt",
+    "sha256": "2c6e08e3a48c40c2162bee39ff52bfccb061688b435e81bfe03bc3800a682fe2"
+  },
+  {
+    "file": "android\\app\\src\\test\\java\\me\\kavishdevar\\librepods\\utils\\M51ScanRecoveryPolicyTest.kt",
+    "sha256": "93397fc69f71a573831f5ea3dccfc381ef3802508f431743a84e91be8ae4458a"
+  }
+]

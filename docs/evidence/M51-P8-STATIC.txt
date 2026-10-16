@@ -1,0 +1,10 @@
+test_internal_retries_do_not_reset_failure_budget (__main__.ReconstructedSourceChecks.test_internal_retries_do_not_reset_failure_budget) ... ok
+test_late_single_and_batch_callbacks_cannot_deliver_data (__main__.ReconstructedSourceChecks.test_late_single_and_batch_callbacks_cannot_deliver_data) ... ok
+test_old_callback_is_stopped_before_new_callback_assignment (__main__.ReconstructedSourceChecks.test_old_callback_is_stopped_before_new_callback_assignment) ... ok
+test_prior_battery_and_transport_paths_remain (__main__.ReconstructedSourceChecks.test_prior_battery_and_transport_paths_remain) ... ok
+test_unknown_lid_survives_decoder_to_popup_policy (__main__.ReconstructedSourceChecks.test_unknown_lid_survives_decoder_to_popup_policy) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.001s
+
+OK

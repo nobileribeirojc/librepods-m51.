@@ -14,6 +14,8 @@ permissions:
   contents: read
 jobs:
   apk:
+    # Audit branch must never generate/distribute a legacy APK.
+    if: github.head_ref != 'm51-root-cause-audit' && github.ref != 'refs/heads/m51-root-cause-audit'
     runs-on: ubuntu-latest
     timeout-minutes: 50
     steps:
