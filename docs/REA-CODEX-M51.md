@@ -1,3 +1,5 @@
+> Continuacao fisica de 16/10/2026: veja [HCI e candidato p9](M51-PHYSICAL-HCI-2026-10-16.md). Houve leitura das tres baterias em replay controlado; 41 testes e CI Android passaram no commit608fddf. O binario p9 ainda nao foi instalado no aparelho. O historico abaixo foi preservado.
+
 # REA + Codex: investigação reprodutível do LibrePods M51
 
 **Alvo:** Samsung Galaxy M51 (SM-M515F), Android 12/API 31, AirPods Pro 3, sem root.

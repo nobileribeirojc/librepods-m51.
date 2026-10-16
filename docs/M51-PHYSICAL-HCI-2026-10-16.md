@@ -9,8 +9,8 @@ estojo50%**, com os dois fones carregando. Isso comprova uma leitura no teste
 controlado; nao comprova estabilidade do APK distribuido, nem instala p9.
 
 O candidato de fonte p9 implementa entrega periodica de lotes para M51/API31.
-Compilacao Android/CI e validacao de um futuro candidato no aparelho devem ser
-conferidas separadamente. Nao tratar o teste do p8 modificado em memoria como
+O CI Android passou testes e assembleDebug no commit608fddf; a validacao do
+binario p9 no aparelho continua pendente. Nao tratar p8 modificado em memoria como
 teste do binario p9. Nenhum APK novo foi instalado ou publicado nesta etapa.
 
 ## Ambiente e artefato
@@ -109,15 +109,26 @@ nao fazia esse flush. As licencas anteriores foram preservadas.
 - Kotlin/JUnit local: **41 testes aprovados**, incluindo33 anteriores,
   cancelamento/substituicao/falha do pump, seletor do aparelho, frescor e fixture HCI.
 - Verificador estrutural p0-p8: **5/5**, incluindo callback unico e retry limitado.
-- Evidencia local de41 testes e hashes dos12 fontes testados serao preservados
-  junto ao candidato. CI Android ainda deve confirmar compilacao e testes.
-- A montagem debug de verificacao deve ocorrer apenas apos os testes no CI;
-  nenhum artefato APK sera publicado por esse workflow de auditoria.
+- CI do commit `608fddfd241c6aad896f956ec346e39d8eb8d6c2`:
+  [run38978686672](https://github.com/nobileribeirojc/librepods-m51./actions/runs/38978686672),
+  job117234166119, **success**. `:app:testDebugUnitTest` passou em2m6s;
+  depois `:app:assembleDebug` passou em57s. Houve compilacao Kotlin Android.
+- Relatorios JUnit do CI foram baixados e contados:41 testes,0 falhas,0 erros,
+  distribuidos em15 PublicProximity,4 Popup,5 AutoBattery,4 Transport,5 Recovery,
+  8 BatchScan. Artefato12079664289, SHA256
+  `94ce7c6800f23777b88f802f4674ccacd17d7c4b30addc04123e8d39df5026e3`.
+- CI publicou apenas relatorios e fonte: artefatos `m51-audit-junit-reports`
+  e `m51-audited-source-not-apk` (12079614030). Nenhum APK foi publicado.
+  Workflow legado de APK ficou skipped no run38978692050.
+- Hashes dos12 fontes standalone testados no Windows estao em evidencia;
+  nao sao hashes do APK nem uma afirmacao de igualdade CRLF/LF com o CI.
+- Uma reconstrucao limpa do ZIP, v9 e p0-p9 tambem passou. Os12 fontes
+  coincidiram textualmente apos normalizar somente CRLF/LF.
 
 ## Trabalho restante
 
-1. Conferir CI Android e revisar a integracao do pump; candidato ainda nao foi
-   instalado/testado no aparelho. Repetir abertura com captura continua e
+1. Validar o binario p9 no aparelho, com autorizacao antes da instalacao;
+   candidato ainda nao foi instalado/testado. Repetir abertura com captura continua e
    comparar CAPod/esquerda/direita/estojo na mesma janela.
 2. Medir atualizacao continua, consumo, segundo plano, reconexao Bluetooth,
    rotacao e rejeicao de lote antigo. Rotacao reiniciou busca e confundiu um
@@ -125,7 +136,11 @@ nao fazia esse flush. As licencas anteriores foram preservadas.
 3. Popup: permissao de sobreposicao foi pulada, ainda sem teste conclusivo.
 4. Sensores: os testes descritos mantiveram fones no estojo. Nenhum evento
    de retirada/recolocacao confiavel foi validado; pausa/retomada nao foi ativada.
-5. L2CAP/AACP: nenhuma nova negociacao manual foi realizada nesta fase. O erro
+5. L2CAP/AACP: foram reagrupados2305 PDUs L2CAP do HCI02. As requisicoes de
+   conexao classicas observadas foram11 para PSM0x0001/SDP, com11 respostas
+   de sucesso. Nenhuma requisicao0x1001 foi observada nessas capturas. Agregados
+   nao atribuem conexoes a um aplicativo/periferico nem explicam erro antigo.
+   Nenhuma nova negociacao AACP manual foi realizada nesta fase. O erro
    anterior `read ret: -1` continua sem causa determinada; audio A2DP nao prova
    AACP. Nao habilitar ANC/Transparencia por essas evidencias BLE.
 6. Desativar HCI nas Opcoes do desenvolvedor apos concluir a coleta fisica.

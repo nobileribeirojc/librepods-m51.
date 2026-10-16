@@ -1,0 +1,16 @@
+{
+  "source": "HCI02 cumulative, private ACL reassembly; no addresses or payloads exported",
+  "counts": {
+    "reassembled_l2cap_pdus": 2305
+  },
+  "classic_l2cap_connection_requests_by_psm": {
+    "0x0001": 11
+  },
+  "matched_connection_responses": {
+    "psm0x0001/result0x0000/status0x0000": 11
+  },
+  "limitations": [
+    "No attribution to a specific peripheral or app from these aggregates.",
+    "No inference about the previous read ret -1 without a correlated AACP attempt."
+  ]
+}
