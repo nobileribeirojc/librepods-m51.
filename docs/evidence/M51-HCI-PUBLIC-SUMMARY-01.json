@@ -1,0 +1,88 @@
+{
+  "hci_member_count": 1,
+  "members": [
+    {
+      "member_index": 0,
+      "bytes": 437018,
+      "sha256": "7c80dc0131ff05ec9efe07707eba7d85bed133455a99c65b98ff4bb500686803",
+      "status": "parsed",
+      "version": 1,
+      "datalink": 1002,
+      "counts": {
+        "records": 3088,
+        "non_event_packets": 1134,
+        "event_0x0e": 502,
+        "event_0x3e": 1390,
+        "le_advertising_reports": 1390,
+        "event_0x0f": 10,
+        "event_0x01": 1,
+        "event_0x04": 1,
+        "event_0x03": 1,
+        "event_0x20": 1,
+        "event_0x1d": 6,
+        "event_0x1c": 1,
+        "event_0x0c": 1,
+        "event_0x1b": 2,
+        "event_0x0b": 1,
+        "event_0x13": 31,
+        "event_0x07": 1,
+        "event_0x23": 2,
+        "event_0x38": 1,
+        "event_0x12": 1,
+        "event_0x05": 1
+      },
+      "epoch_converted_bounds": [
+        "2026-10-16T19:18:10.127461+00:00",
+        "2026-10-16T19:23:42.491382+00:00"
+      ],
+      "apple_tlv_types": {
+        "0x10/len5": 272,
+        "0x12/len2": 40,
+        "0x07/len25": 281
+      },
+      "public_proximity": [
+        {
+          "prefix": 1,
+          "model_be": "0x2720",
+          "model_le": "0x2027",
+          "public_header": "07190127203487b5110000",
+          "count": 10
+        },
+        {
+          "prefix": 1,
+          "model_be": "0x2720",
+          "model_le": "0x2027",
+          "public_header": "07190127203587b5110004",
+          "count": 65
+        },
+        {
+          "prefix": 1,
+          "model_be": "0x2720",
+          "model_le": "0x2027",
+          "public_header": "07190127205578b5110004",
+          "count": 68
+        },
+        {
+          "prefix": 1,
+          "model_be": "0x2720",
+          "model_le": "0x2027",
+          "public_header": "07190127203587b5110000",
+          "count": 69
+        },
+        {
+          "prefix": 1,
+          "model_be": "0x2720",
+          "model_le": "0x2027",
+          "public_header": "07190127205578b5110000",
+          "count": 69
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "Device/vendor timestamp timezone alignment not verified.",
+    "No vendor-specific batch event decoding.",
+    "No claim of complete radio coverage.",
+    "Only public target headers; no addresses or encrypted data emitted."
+  ]
+}

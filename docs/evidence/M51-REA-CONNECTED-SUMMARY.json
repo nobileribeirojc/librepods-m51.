@@ -1,0 +1,48 @@
+{
+  "date": "2026-10-16",
+  "server": {
+    "version": "6.5.0",
+    "client": {
+      "name": "codex-mcp-client",
+      "version": "0.163.0-alpha.10.2"
+    },
+    "protocol": "2025-06-18",
+    "counts": {
+      "cli_commands": 153,
+      "mcp_tools": 207,
+      "mcp_prompts": 6
+    }
+  },
+  "android_available": true,
+  "adb_available": true,
+  "anonymous_method_coverage": [
+    {
+      "evidence_id": "ev_48f6b7f6ec46594ac83062bf5c12eac5c6ff3105257d0136af50f1c707fa4e4b",
+      "operation": "inspect_android_method",
+      "class_name": "me.kavishdevar.librepods.services.AirPodsService$bleStatusListener$1",
+      "method": {
+        "name": "onEarStateChanged",
+        "reported_signature": "onEarStateChanged(me.kavishdevar.librepods.utils.BLEManager$AirPodsStatus, boolean, boolean): void",
+        "overload_index": 0,
+        "is_constructor": false,
+        "dex_descriptor": "(Lme/kavishdevar/librepods/utils/BLEManager$AirPodsStatus;ZZ)V"
+      },
+      "body_status": "not_available",
+      "limitation": "Metadata recovered; anonymous-method body unavailable. Do not infer native/abstract semantics from provider placeholder."
+    },
+    {
+      "evidence_id": "ev_6bf4cd97b280e899662ae14758376f3890b626f6f8d9458fc668bb1957adefda",
+      "operation": "inspect_android_method",
+      "class_name": "me.kavishdevar.librepods.services.AirPodsService$bleStatusListener$1",
+      "method": {
+        "name": "onNearbyProximityAdvertisement",
+        "reported_signature": "onNearbyProximityAdvertisement(me.kavishdevar.librepods.utils.BLEManager$AirPodsStatus, int): void",
+        "overload_index": 0,
+        "is_constructor": false,
+        "dex_descriptor": "(Lme/kavishdevar/librepods/utils/BLEManager$AirPodsStatus;I)V"
+      },
+      "body_status": "not_available",
+      "limitation": "Metadata recovered; anonymous-method body unavailable. Do not infer native/abstract semantics from provider placeholder."
+    }
+  ]
+}

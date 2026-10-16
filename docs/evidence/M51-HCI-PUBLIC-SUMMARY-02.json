@@ -1,0 +1,174 @@
+{
+  "hci_member_count": 1,
+  "members": [
+    {
+      "member_index": 0,
+      "bytes": 1482788,
+      "sha256": "48e9d8cbe39f03a0daed78d7d8b902e9d1fab305d1f1dcba38013444bbcd31bf",
+      "status": "parsed",
+      "version": 1,
+      "datalink": 1002,
+      "counts": {
+        "records": 10024,
+        "non_event_packets": 3730,
+        "event_0x0e": 1337,
+        "event_0x3e": 4636,
+        "le_advertising_reports": 4635,
+        "event_0x0f": 88,
+        "event_0x01": 1,
+        "event_0x04": 3,
+        "event_0x03": 29,
+        "event_0x20": 3,
+        "event_0x1d": 23,
+        "event_0x1c": 4,
+        "event_0x0c": 4,
+        "event_0x1b": 7,
+        "event_0x0b": 4,
+        "event_0x13": 110,
+        "event_0x07": 29,
+        "event_0x23": 8,
+        "event_0x38": 1,
+        "event_0x12": 3,
+        "event_0x05": 3,
+        "event_0x3d": 1
+      },
+      "epoch_converted_bounds": [
+        "2026-10-16T19:18:10.127461+00:00",
+        "2026-10-16T19:40:01.918835+00:00"
+      ],
+      "apple_tlv_types": {
+        "0x10/len5": 819,
+        "0x12/len2": 136,
+        "0x07/len25": 1699,
+        "0x12/len25": 3
+      },
+      "public_proximity": [
+        {
+          "prefix": 1,
+          "model_be": "0x2720",
+          "model_le": "0x2027",
+          "public_header": "07190127203487b5110000",
+          "count": 40
+        },
+        {
+          "prefix": 1,
+          "model_be": "0x2720",
+          "model_le": "0x2027",
+          "public_header": "07190127203587b5110004",
+          "count": 315
+        },
+        {
+          "prefix": 1,
+          "model_be": "0x2720",
+          "model_le": "0x2027",
+          "public_header": "07190127205578b5110004",
+          "count": 319
+        },
+        {
+          "prefix": 1,
+          "model_be": "0x2720",
+          "model_le": "0x2027",
+          "public_header": "07190127203587b5110000",
+          "count": 227
+        },
+        {
+          "prefix": 1,
+          "model_be": "0x2720",
+          "model_le": "0x2027",
+          "public_header": "07190127205578b5110000",
+          "count": 225
+        },
+        {
+          "prefix": 1,
+          "model_be": "0x2720",
+          "model_le": "0x2027",
+          "public_header": "07190127205577b5110000",
+          "count": 18
+        },
+        {
+          "prefix": 1,
+          "model_be": "0x2720",
+          "model_le": "0x2027",
+          "public_header": "07190127203577b5110000",
+          "count": 16
+        },
+        {
+          "prefix": 1,
+          "model_be": "0x2720",
+          "model_le": "0x2027",
+          "public_header": "07190127203578b5110000",
+          "count": 189
+        },
+        {
+          "prefix": 1,
+          "model_be": "0x2720",
+          "model_le": "0x2027",
+          "public_header": "07190127205587b5110000",
+          "count": 180
+        },
+        {
+          "prefix": 1,
+          "model_be": "0x2720",
+          "model_le": "0x2027",
+          "public_header": "07190127205587b5390000",
+          "count": 9
+        },
+        {
+          "prefix": 1,
+          "model_be": "0x2720",
+          "model_le": "0x2027",
+          "public_header": "07190127203578b5390000",
+          "count": 1
+        },
+        {
+          "prefix": 1,
+          "model_be": "0x2720",
+          "model_le": "0x2027",
+          "public_header": "07190127203578b5190000",
+          "count": 7
+        },
+        {
+          "prefix": 1,
+          "model_be": "0x2720",
+          "model_le": "0x2027",
+          "public_header": "07190127203578b5120000",
+          "count": 44
+        },
+        {
+          "prefix": 1,
+          "model_be": "0x2720",
+          "model_le": "0x2027",
+          "public_header": "07190127205587b5320000",
+          "count": 36
+        },
+        {
+          "prefix": 1,
+          "model_be": "0x2720",
+          "model_le": "0x2027",
+          "public_header": "07190127203578b5120004",
+          "count": 38
+        },
+        {
+          "prefix": 1,
+          "model_be": "0x2720",
+          "model_le": "0x2027",
+          "public_header": "07190127205587b5320004",
+          "count": 34
+        },
+        {
+          "prefix": 1,
+          "model_be": "0x2720",
+          "model_le": "0x2027",
+          "public_header": "07190127205578b5130000",
+          "count": 1
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "Device/vendor timestamp timezone alignment not verified.",
+    "No vendor-specific batch event decoding.",
+    "No claim of complete radio coverage.",
+    "Only public target headers; no addresses or encrypted data emitted."
+  ]
+}

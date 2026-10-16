@@ -1,0 +1,50 @@
+{
+  "sha256": "94ce7c6800f23777b88f802f4674ccacd17d7c4b30addc04123e8d39df5026e3",
+  "suites": [
+    {
+      "name": "me.kavishdevar.librepods.utils.CasePopupPolicyTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "name": "me.kavishdevar.librepods.utils.M51AutoBatteryPolicyTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "name": "me.kavishdevar.librepods.utils.M51BatchScanPolicyTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "name": "me.kavishdevar.librepods.utils.M51ControlTransportPolicyTest",
+      "tests": "4",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "name": "me.kavishdevar.librepods.utils.M51ScanRecoveryPolicyTest",
+      "tests": "5",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "name": "me.kavishdevar.librepods.utils.PublicProximityTest",
+      "tests": "15",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    }
+  ],
+  "tests": 41,
+  "failures": 0,
+  "errors": 0
+}
